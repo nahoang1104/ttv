@@ -30,6 +30,30 @@ TTV.ready = TTV.Store.ready().then(function () { return TTV.Seed.run(); }).then(
       C.card(C.loading('Đang tải dữ liệu mẫu…'),'Trạng thái tải') +
       '<div class="component-group">' + C.button('Thử bottom sheet',{block:true,action:'demo-sheet'}) + '</div></main>' + C.bottomTab('home');
   }
+  TTV.Router.add('/home', function () {
+    TTV.screens.home.render(document.getElementById('app'));
+  }, { destroy: function () { TTV.screens.home.destroy(); } });
+  function stubScreen(title, tab) {
+    return function (ctx) {
+      var C = TTV.Components, app = document.getElementById('app');
+      app.classList.remove('is-wide');
+      var extra = '';
+      if (ctx.path === '/create/order') {
+        extra += '<p>Dịch vụ: <strong>' + C.escape(ctx.query.service || 'chưa chọn') + '</strong></p>';
+        var pasted = '';
+        try { pasted = sessionStorage.getItem(TTV.screens.home.pasteKey) || ''; } catch (_) {}
+        if (pasted) extra += '<p>Điểm trả đã dán: ' + C.escape(pasted) + '</p>';
+      }
+      app.innerHTML = C.header(title, { back: true }) + '<main class="page">' + extra +
+        C.notice('Màn hình này sẽ được làm đầy đủ ở các task tiếp theo.', 'Sắp có') + '</main>' + C.bottomTab(tab || '');
+    };
+  }
+  TTV.Router.add('/create/order', stubScreen('Đặt đơn bốc vác', 'home'));
+  TTV.Router.add('/notifications', stubScreen('Thông báo', 'home'));
+  TTV.Router.add('/coupons', stubScreen('Mã giảm giá', 'home'));
+  TTV.Router.add('/wallet', stubScreen('Ví của tôi', 'wallet'));
+  TTV.Router.add('/orders', stubScreen('Đơn hàng', 'history'));
+  TTV.Router.add('/profile', stubScreen('Cá nhân', 'profile'));
   TTV.Router.add('/sim/components', renderDemo);
   TTV.Router.add('/sim/upload', function () {
     var C = TTV.Components, app = document.getElementById('app');
@@ -43,10 +67,7 @@ TTV.ready = TTV.Store.ready().then(function () { return TTV.Seed.run(); }).then(
       '</main>';
     TTV.Upload.hasDirectory().then(function (has) { var el = document.getElementById('upload-dir-status'); if (el) el.textContent = has ? 'Đã lưu handle thư mục. Có thể cần cấp lại quyền khi tải file.' : 'Chưa chọn thư mục.'; }).catch(function () {});
   });
-  TTV.Router.add('/', function () {
-    var app = document.getElementById('app');
-    app.innerHTML = TTV.Components.header('TingTingVac',{back:false,large:true}) + '<main class="page">' + TTV.Components.card('<p>Khung ứng dụng đã sẵn sàng.</p><p class="muted">Nền tảng, lưu trữ, upload và tiện ích dùng chung đã có thể kiểm tra.</p><button class="btn btn-primary btn-block" data-route="/sim/components">Mở trang thử component</button><button class="btn btn-secondary btn-block" data-route="/sim/upload">Kiểm tra upload & tiện ích</button>','Bắt đầu') + TTV.Components.notice('Đây là bản demo frontend; các màn nghiệp vụ sẽ được triển khai ở những task tiếp theo.') + '</main>';
-  });
+  TTV.Router.add('/', function () { TTV.Router.navigate('/home'); });
   TTV.Router.on404(function (ctx) { TTV.Router.render404(ctx); });
   document.addEventListener('click', function (e) {
     var action = e.target.closest('[data-action]'); if (!action) return;

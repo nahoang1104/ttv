@@ -40,7 +40,7 @@ window.TTV = window.TTV || {};
     {id:'refund',type:'refund',title:'Chính sách hoàn tiền',content:'Các khoản giữ và hoàn tiền chỉ mô phỏng luồng nghiệp vụ; không phát sinh giao dịch thanh toán thật.',updated_at:'2026-10-09T00:00:00.000Z'}
   ];
   var banners = [
-    {id:'banner-welcome',title:'Chào mừng đến TingTingVac',subtitle:'Đặt thợ bốc vác nhanh chóng',type:'member',target:'none',image_path:'',sort:1,active:true},
+    {id:'banner-welcome',title:'Ưu đãi Hội viên',subtitle:'Tiết kiệm đến 20% mọi đơn bốc vác',type:'member',target:'coupon',image_path:'',sort:1,active:true},
     {id:'banner-coupon',title:'Ưu đãi khách mới',subtitle:'Nhập mã TTVNEW10',type:'promo',target:'coupon',image_path:'',sort:2,active:true},
     {id:'banner-explore',title:'Dịch vụ an tâm',subtitle:'Đội ngũ thợ sẵn sàng hỗ trợ',type:'explore',target:'none',image_path:'',sort:3,active:true}
   ];
