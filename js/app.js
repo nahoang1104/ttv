@@ -3,7 +3,7 @@ window.TTV = window.TTV || {};
 TTV.config = window.TTV_CONFIG;
 
 // Chuẩn bị DB và nạp seed một lần trước khi điều hướng.
-TTV.ready = TTV.Store.ready().then(function () { return TTV.Seed.run(); }).then(function (result) {
+TTV.ready = TTV.Store.ready().then(function () { return TTV.Seed.run(); }).then(function (result) { return TTV.api.ensureSeedStaff().catch(function (e) { console.warn("[TTV] ensureSeedStaff:", e); }).then(function () { return result; }); }).then(function (result) {
   TTV.seedResult = result;
   return result;
 }).catch(function (error) {
@@ -45,7 +45,7 @@ TTV.ready = TTV.Store.ready().then(function () { return TTV.Seed.run(); }).then(
   });
   TTV.Router.add('/', function () {
     var app = document.getElementById('app');
-    app.innerHTML = TTV.Components.header('TingTingVac',{back:false,large:true}) + '<main class="page">' + TTV.Components.card('<p>Khung ứng dụng đã sẵn sàng.</p><p class="muted">Nền tảng, lưu trữ, upload và tiện ích dùng chung đã có thể kiểm tra.</p><button class="btn btn-primary btn-block" data-route="/sim/components">Mở trang thử component</button><button class="btn btn-secondary btn-block" data-route="/sim/upload">Kiểm tra upload & tiện ích</button>','Bắt đầu') + TTV.Components.notice('Đây là bản demo frontend; các màn nghiệp vụ sẽ được triển khai ở những task tiếp theo.') + '</main>';
+    app.innerHTML = TTV.Components.header('TingTingVac',{back:false,large:true}) + '<main class="page">' + TTV.Components.card('<p>Khung ứng dụng đã sẵn sàng.</p><p class="muted">Nền tảng, lưu trữ, upload và tiện ích dùng chung đã có thể kiểm tra.</p><button class="btn btn-primary btn-block" data-route="/sim/components">Mở trang thử component</button><button class="btn btn-secondary btn-block" data-route="/sim/upload">Kiểm tra upload & tiện ích</button><button class=\"btn btn-primary btn-block\" data-route=\"/login\">Đăng nhập khách (task 2.2)</button>','Bắt đầu') + TTV.Components.notice('Đây là bản demo frontend; các màn nghiệp vụ sẽ được triển khai ở những task tiếp theo.') + '</main>';
   });
   TTV.Router.on404(function (ctx) { TTV.Router.render404(ctx); });
   document.addEventListener('click', function (e) {
