@@ -1,0 +1,13 @@
+# Upload của người dùng: bỏ hết, chỉ giữ ảnh seed
+uploads/*
+!uploads/
+!uploads/seed/
+!uploads/seed/**
+
+# Hệ thống / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+node_modules/
+*.log
