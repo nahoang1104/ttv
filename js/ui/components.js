@@ -42,5 +42,6 @@ window.TTV = window.TTV || {};
     var back = e.target.closest('[data-back]'); if (back) { e.preventDefault(); if (history.length > 1) history.back(); else TTV.Router.navigate('/'); return; }
     var close = e.target.closest('[data-modal-close], [data-sheet-close]'); if (close) { if (close.matches('[data-modal-close]') && close.classList.contains('modal-backdrop') || close.matches('[data-sheet-close]') && close.classList.contains('sheet-backdrop') || close.matches('button')) { var overlay = close.closest('.modal-backdrop, .sheet-backdrop') || close; overlay.remove(); } return; }
     var step = e.target.closest('[data-step]'); if (step) { var wrap = step.closest('.stepper'), out = wrap.querySelector('output'), next = Math.max(+wrap.dataset.min, Math.min(+wrap.dataset.max, (+out.value || +out.textContent || 0) + (+step.dataset.step))); out.textContent = next; out.value = next; }
+    var tab = e.target.closest('[data-tab]'); if (tab) { tab.parentElement.querySelectorAll('[data-tab]').forEach(function (t) { t.classList.toggle('is-active', t === tab); t.setAttribute('aria-selected', t === tab ? 'true' : 'false'); }); }
   });
 })(window.TTV);

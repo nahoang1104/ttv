@@ -26,8 +26,7 @@ window.TTV = window.TTV || {};
       'home.banner.memberSub': 'Tiết kiệm đến 20% mọi đơn bốc vác',
       'home.banner.promo': 'Ưu đãi khách mới',
       'home.explore.card1': 'Bốc vác công kênh chuyên nghiệp',
-      'home.explore.card2': 'Khai giá hàng hóa là gì?',
-      'home.explore.card3': 'Bốc xếp an toàn'
+      'home.explore.card2': 'Khai giá hàng hóa là gì?'
     },
     en: { 'common.loading': 'Loading…', 'common.save': 'Save', 'common.cancel': 'Cancel', 'common.error': 'An error occurred' }
   };
@@ -98,8 +97,8 @@ window.TTV = window.TTV || {};
   }
   TTV.I18n = { t: t, setLocale: setLocale, getLocale: function () { return locale; }, dictionaries: dictionaries };
   TTV.Utils = {
-    money: money, formatMoney: money, date: date, formatDate: date, relativeTime: relativeTime,
-    maskPhone: maskPhone, id: id, generateId: id, orderCode: orderCode, generateOrderCode: orderCode, audit: audit
+    money: money, date: date, relativeTime: relativeTime,
+    maskPhone: maskPhone, id: id, orderCode: orderCode, audit: audit
   };
   TTV.audit = audit;
 })(window.TTV);

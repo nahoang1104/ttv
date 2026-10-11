@@ -8,7 +8,13 @@ window.TTV = window.TTV || {};
   }
   TTV.api = {
     listServices: function () {
-      return store().list('services');
+      var order = ['moving', 'warehouse', 'furniture', 'office', 'construction', 'hourly', 'goods'];
+      return store().list('services').then(function (rows) {
+        return (rows || []).slice().sort(function (a, b) {
+          var ia = order.indexOf(a.code || a.id), ib = order.indexOf(b.code || b.id);
+          return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+        });
+      });
     },
     listBanners: function () {
       return store().list('banners').then(function (rows) {

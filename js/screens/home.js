@@ -44,12 +44,11 @@ TTV.screens = TTV.screens || {};
   function defaultExplore() {
     return [
       { title: t('home.explore.card1'), tone: 'green' },
-      { title: t('home.explore.card2'), tone: 'blue' },
-      { title: t('home.explore.card3'), tone: 'navy' }
+      { title: t('home.explore.card2'), tone: 'blue' }
     ];
   }
 
-  function bannerSlide(banner, index) {
+  function bannerSlide(banner) {
     var type = banner.type || 'promo';
     var title = banner.title || (type === 'member' ? t('home.banner.member') : t('home.banner.promo'));
     var sub = banner.subtitle || (type === 'member' ? t('home.banner.memberSub') : '');
@@ -123,10 +122,7 @@ TTV.screens = TTV.screens || {};
   function markup(data) {
     var unread = data.unread > 0;
     var services = data.services || [];
-    var banners = data.banners && data.banners.length ? data.banners : [
-      { id: 'member', type: 'member', title: t('home.banner.member'), subtitle: t('home.banner.memberSub'), target: 'coupon' },
-      { id: 'promo', type: 'promo', title: t('home.banner.promo'), subtitle: 'Nhập mã TTVNEW10', target: 'coupon' }
-    ];
+    var banners = data.banners || [];
     var zalo = data.zalo || 'https://zalo.me';
     return '<div class="home">' +
       '<header class="home-hero">' +
@@ -184,7 +180,7 @@ TTV.screens = TTV.screens || {};
     var pickup = e.target.closest('[data-action="home-pickup"]');
     if (pickup) { goCreate({}); return; }
     var drop = e.target.closest('[data-action="home-dropoff"]');
-    if (drop) { goCreate({ focus: 'dropoff' }); return; }
+    if (drop) { goCreate({}); return; }
     var service = e.target.closest('[data-action="home-service"]');
     if (service) { goCreate({ service: service.getAttribute('data-service') }); }
   }
@@ -195,20 +191,14 @@ TTV.screens = TTV.screens || {};
       TTV.screens.home.destroy();
       container.classList.remove('is-wide');
       container.innerHTML = TTV.Components.loading(t('common.loading'));
-      var api = TTV.api || {};
       Promise.all([
-        api.listServices ? api.listServices() : Promise.resolve([]),
-        api.listBanners ? api.listBanners() : Promise.resolve([]),
-        api.getSetting ? api.getSetting('zalo_url') : Promise.resolve('https://zalo.me'),
-        api.unreadNotificationCount ? api.unreadNotificationCount() : Promise.resolve(0)
+        TTV.api.listServices(),
+        TTV.api.listBanners(),
+        TTV.api.getSetting('zalo_url'),
+        TTV.api.unreadNotificationCount()
       ]).then(function (parts) {
-        var order = ['moving', 'warehouse', 'furniture', 'office', 'construction', 'hourly', 'goods'];
-        var services = (parts[0] && parts[0].length ? parts[0].slice() : []).sort(function (a, b) {
-          var ia = order.indexOf(a.code || a.id), ib = order.indexOf(b.code || b.id);
-          return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
-        });
         container.innerHTML = markup({
-          services: services,
+          services: parts[0] || [],
           banners: parts[1] || [],
           zalo: parts[2] || 'https://zalo.me',
           unread: parts[3] || 0
