@@ -166,7 +166,7 @@ window.TTV = window.TTV || {};
   api.logout = function () {
     var s = TTV.auth.getSession();
     writeChallenge(null);
-    try { sessionStorage.removeItem('ttv_draft_dropoff'); } catch (_) {}
+    try { sessionStorage.removeItem('ttv_draft_dropoff'); sessionStorage.removeItem('ttv_draft_order'); } catch (_) {}
     var log = s && STAFF_ROLES.indexOf(s.role) >= 0
       ? TTV.Utils.audit('auth.logout', { target_table: 'staff', target_id: s.account_id, actor_id: s.account_id, actor_role: s.role }).catch(function () {})
       : Promise.resolve();
@@ -398,18 +398,33 @@ window.TTV = window.TTV || {};
   };
 
   api.listAddresses = function () {
-    return store().list('addresses');
+    var s = customerSession();
+    if (!s) return Promise.resolve([]);
+    return store().query('addresses', { user_id: s.account_id }).then(function (rows) {
+      return (rows || []).slice().sort(function (a, b) {
+        if (!!a.is_default !== !!b.is_default) return a.is_default ? -1 : 1;
+        return String(b.created_at || '').localeCompare(String(a.created_at || ''));
+      });
+    });
   };
 
   api.getAddress = function (id) {
-    return store().get('addresses', id);
+    var s = customerSession();
+    if (!s) return Promise.resolve(null);
+    return store().get('addresses', id).then(function (row) {
+      if (!row || row.user_id !== s.account_id) return null;
+      return row;
+    });
   };
 
   api.saveAddress = function (payload) {
     payload = payload || {};
+    var s = customerSession();
+    if (!s) return Promise.reject(new Error('Hãy đăng nhập để lưu địa chỉ.'));
+    var now = new Date().toISOString();
     var row = {
       id: payload.id || TTV.Utils.id(),
-      user_id: payload.user_id || 'local-demo',
+      user_id: s.account_id,
       label: String(payload.label || '').trim().slice(0, 80),
       type: payload.type || 'home',
       detail: String(payload.detail || '').trim().slice(0, 250),
@@ -417,11 +432,15 @@ window.TTV = window.TTV || {};
       lng: payload.lng == null ? null : Number(payload.lng),
       contact_name: String(payload.contact_name || '').trim(),
       contact_phone: String(payload.contact_phone || '').trim(),
-      is_default: !!payload.is_default
+      is_default: !!payload.is_default,
+      created_at: payload.created_at || now,
+      updated_at: now
     };
     if (!row.label || !row.detail) return Promise.reject(new Error('Nhập tên gợi nhớ và địa chỉ chi tiết.'));
-    return store().list('addresses').then(function (rows) {
+    return store().query('addresses', { user_id: s.account_id }).then(function (rows) {
       var ops = [];
+      var existing = (rows || []).filter(function (item) { return item.id === row.id; })[0];
+      if (existing && existing.created_at) row.created_at = existing.created_at;
       if (row.is_default) {
         (rows || []).forEach(function (item) {
           if (item.id !== row.id && item.is_default) {
