@@ -59,7 +59,6 @@ TTV.ready = TTV.Store.ready().then(function () { return TTV.Seed.run(); }).then(
   TTV.Router.add('/coupons', stub('Mã giảm giá', 'home'));
   TTV.Router.add('/wallet', stub('Ví của tôi', 'wallet'));
   TTV.Router.add('/orders', stub('Đơn hàng', 'history'));
-  TTV.Router.add('/profile', stub('Cá nhân', 'profile'));
   TTV.Router.add('/', function () {
     var app = document.getElementById('app');
     app.innerHTML = TTV.Components.header('TingTingVac',{back:false,large:true}) + '<main class="page">' + TTV.Components.card('<p>Khung ứng dụng đã sẵn sàng.</p><p class="muted">Nền tảng, lưu trữ, upload và tiện ích dùng chung đã có thể kiểm tra.</p><button class="btn btn-primary btn-block" data-route="/sim/components">Mở trang thử component</button><button class="btn btn-secondary btn-block" data-route="/sim/upload">Kiểm tra upload & tiện ích</button><button class="btn btn-primary btn-block" data-route="/login">Đăng nhập khách (task 2.2)</button>','Bắt đầu') + TTV.Components.notice('Đây là bản demo frontend; các màn nghiệp vụ sẽ được triển khai ở những task tiếp theo.') + '</main>';
@@ -82,7 +81,7 @@ TTV.ready = TTV.Store.ready().then(function () { return TTV.Seed.run(); }).then(
   });
   document.addEventListener('click', function(e){var tab=e.target.closest('[data-tab]');if(tab){tab.parentElement.querySelectorAll('[data-tab]').forEach(function(t){t.classList.toggle('is-active',t===tab);t.setAttribute('aria-selected',t===tab?'true':'false');});}});
 
-  TTV.ready.then(function () { TTV.Router.start(); }).catch(function () {
+  TTV.ready.then(function () { return TTV.api.validateSession(); }).then(function () { TTV.Router.start(); }).catch(function () {
     document.getElementById('app').innerHTML = '<main class="page"><h2>Không thể khởi tạo ứng dụng</h2><p>Hãy tải lại trang. Nếu lỗi tiếp tục, kiểm tra quyền IndexedDB hoặc chế độ duyệt riêng tư.</p></main>';
   });
 })(window.TTV);

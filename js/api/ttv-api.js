@@ -160,7 +160,40 @@ window.TTV = window.TTV || {};
     if (!s || s.account_type !== 'customer') return Promise.resolve(null);
     return TTV.Store.get('users', s.account_id);
   };
-  api.logout = function () { writeChallenge(null); return TTV.auth.destroySession(); };
+  /* ===== 2.5 Đăng xuất, kiểm tra phiên ===== */
+  api.loginRouteFor = function (role) { return role === 'CUSTOMER' ? '/login' : '/staff-login'; };
+  // Đăng xuất: xóa thử thách OTP, bản nháp điểm trả và phiên của tab; staff ghi audit `auth.logout` (ghi trước khi xóa phiên).
+  api.logout = function () {
+    var s = TTV.auth.getSession();
+    writeChallenge(null);
+    try { sessionStorage.removeItem('ttv_draft_dropoff'); } catch (_) {}
+    var log = s && STAFF_ROLES.indexOf(s.role) >= 0
+      ? TTV.Utils.audit('auth.logout', { target_table: 'staff', target_id: s.account_id, actor_id: s.account_id, actor_role: s.role }).catch(function () {})
+      : Promise.resolve();
+    return log.then(function () { return TTV.auth.destroySession(); });
+  };
+  // Đăng xuất rồi về đúng trang đăng nhập của vai trò vừa thoát (thay mục lịch sử để Back không quay lại).
+  api.logoutAndGo = function () {
+    var s = TTV.auth.getSession(), to = api.loginRouteFor(s && s.role);
+    return api.logout().then(function () { TTV.Router.navigate(to, { replace: true }); });
+  };
+  // Khách chưa có họ tên (chưa qua onboarding) thì chưa được vào các màn khác của khu khách.
+  api.sessionNeedsOnboarding = function (session) { return !!session && session.role === 'CUSTOMER' && !String(session.name || '').trim(); };
+  // Chạy lúc khởi động: phiên trỏ tới tài khoản đã bị xóa (ví dụ xóa DB) hoặc bị khóa thì hủy; đồng bộ tên và cờ đổi mật khẩu.
+  api.validateSession = function () {
+    var s = TTV.auth.getSession();
+    if (!s) return Promise.resolve(null);
+    var table = { customer: 'users', vendor: 'vendors', staff: 'staff' }[s.account_type];
+    if (!table) return TTV.auth.destroySession().then(function () { return null; });
+    return TTV.Store.get(table, s.account_id).then(function (row) {
+      if (!row || row.status === 'locked') return TTV.auth.destroySession().then(function () { return null; });
+      var patch = {};
+      if ((row.name || '') !== (s.name || '')) patch.name = row.name || '';
+      if (table !== 'users' && !!row.must_change_pw !== !!s.must_change_pw) patch.must_change_pw = !!row.must_change_pw;
+      return Object.keys(patch).length ? TTV.auth.updateSession(patch) : s;
+    }).catch(function () { return s; }); // lỗi đọc DB: giữ phiên, không đá người dùng ra
+  };
+
   api.normalizePhone = normalizePhone;
   api.OTP = { MAX_ATTEMPTS: OTP_MAX_ATTEMPTS, LOCK_MS: OTP_LOCK_MS, RESEND_MS: OTP_RESEND_MS };
 
@@ -281,6 +314,54 @@ window.TTV = window.TTV || {};
       TTV.auth.updateSession({ must_change_pw: false });
       if (table === 'staff') return TTV.Utils.audit('auth.change_password', { target_table: 'staff', target_id: s.account_id }).catch(function () {});
     }).then(function () { return { next: api.homeRouteFor(s.role) }; });
+  };
+
+  /* ===== 2.6 Hồ sơ khách: Cá nhân, Thông tin cá nhân ===== */
+  api.GENDERS = [{ value: 'male', label: 'Nam' }, { value: 'female', label: 'Nữ' }, { value: 'other', label: 'Khác' }];
+  api.KYC_LABELS = { none: 'Chưa định danh', pending: 'Đang chờ duyệt', verified: 'Đã định danh', rejected: 'Bị từ chối' };
+  function customerSession() { var s = TTV.auth.getSession(); return s && s.account_type === 'customer' ? s : null; }
+  function todayIso() { var d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+  api.todayIso = todayIso;
+  api.isValidDob = function (value) {
+    value = String(value || '');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+    var p = value.split('-').map(Number), d = new Date(Date.UTC(p[0], p[1] - 1, p[2]));
+    if (d.getUTCFullYear() !== p[0] || d.getUTCMonth() !== p[1] - 1 || d.getUTCDate() !== p[2]) return false; // loại 31/02...
+    return p[0] >= 1900 && value <= todayIso();
+  };
+  // Số đơn hoàn thành / đang xử lý (mọi đơn chưa hoàn thành và chưa hủy) của khách đang đăng nhập.
+  api.getProfileStats = function () {
+    var s = customerSession();
+    if (!s) return Promise.resolve({ completed: 0, processing: 0 });
+    return TTV.Store.query('orders', { user_id: s.account_id }).then(function (rows) {
+      var out = { completed: 0, processing: 0 };
+      (rows || []).forEach(function (o) {
+        if (o.status === 'completed') out.completed += 1;
+        else if (o.status !== 'cancelled') out.processing += 1;
+      });
+      return out;
+    });
+  };
+  // Lưu hồ sơ. SĐT không bao giờ được sửa ở đây; avatar_path chỉ nhận đường dẫn uploads/… (hoặc rỗng để xóa).
+  api.updateProfile = function (data) {
+    var s = customerSession();
+    if (!s) return Promise.reject(fail('NO_SESSION', 'Phiên đăng nhập đã hết, hãy đăng nhập lại.'));
+    data = data || {};
+    var name = String(data.name || '').trim().replace(/\s+/g, ' '), email = String(data.email || '').trim();
+    var gender = String(data.gender || ''), dob = String(data.dob || '');
+    if (name.length < 2) return Promise.reject(fail('INVALID_NAME', 'Vui lòng nhập họ và tên.'));
+    if (name.length > 80) return Promise.reject(fail('INVALID_NAME', 'Họ và tên tối đa 80 ký tự.'));
+    if (!api.isValidEmail(email)) return Promise.reject(fail('INVALID_EMAIL', 'Email không hợp lệ.'));
+    if (gender && !api.GENDERS.some(function (g) { return g.value === gender; })) return Promise.reject(fail('INVALID_GENDER', 'Giới tính không hợp lệ.'));
+    if (dob && !api.isValidDob(dob)) return Promise.reject(fail('INVALID_DOB', 'Ngày sinh không hợp lệ.'));
+    var avatar = data.avatar_path;
+    if (avatar != null && avatar !== '' && !/^uploads\/[A-Za-z0-9_\-\/]+\.[A-Za-z0-9]{1,8}$/.test(String(avatar))) return Promise.reject(fail('INVALID_AVATAR', 'Đường dẫn ảnh đại diện không hợp lệ.'));
+    return TTV.Store.get('users', s.account_id).then(function (user) {
+      if (!user) throw fail('NO_USER', 'Không tìm thấy tài khoản.');
+      var next = Object.assign({}, user, { name: name, email: email, gender: gender, dob: dob, updated_at: new Date().toISOString() });
+      if (avatar != null) next.avatar_path = String(avatar);
+      return TTV.Store.put('users', next);
+    }).then(function (user) { TTV.auth.updateSession({ name: user.name }); return user; });
   };
 
   function store() {
