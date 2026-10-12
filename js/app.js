@@ -53,8 +53,8 @@ TTV.ready = TTV.Store.ready().then(function () { return TTV.Seed.run(); }).then(
 
   TTV.Router.add('/home', function () {
     TTV.screens.home.render(document.getElementById('app'));
-  }, { destroy: function () { TTV.screens.home.destroy(); } });
-  TTV.Router.add('/create/order', stub('Đặt đơn bốc vác', 'home'));
+  }, { roles: ['CUSTOMER'], loginRoute: '/login', deniedRoute: '/login', destroy: function () { TTV.screens.home.destroy(); } });
+  TTV.Router.add('/create/order', stub('Đặt đơn bốc vác', 'home'), { roles: ['CUSTOMER'], loginRoute: '/login', deniedRoute: '/login' });
   TTV.Router.add('/notifications', stub('Thông báo', 'home'));
   TTV.Router.add('/coupons', stub('Mã giảm giá', 'home'));
   TTV.Router.add('/wallet', stub('Ví của tôi', 'wallet'));

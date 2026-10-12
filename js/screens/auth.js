@@ -293,16 +293,4 @@ window.TTV = window.TTV || {};
   TTV.screens.auth.renderOnboarding = renderOnboarding;
   TTV.Router.add('/onboarding', renderOnboarding);
 
-  /* ===== Màn tạm cho đến khi làm task 4.1 (để đăng nhập xong không rơi vào 404) ===== */
-  TTV.Router.add('/home', function () {
-    var root = app(), s = TTV.auth.getSession();
-    if (!s || s.role !== 'CUSTOMER') { TTV.Router.navigate('/login'); return; }
-    TTV.api.getCurrentUser().then(function (u) {
-      if (TTV.api.needsOnboarding(u)) { TTV.Router.navigate('/onboarding'); return; }
-      root.innerHTML = C.header('Trang chủ', { back: false }) + '<main class="page">' +
-        C.card('<p>Xin chào <b>' + esc(u.name) + '</b> (' + esc(u.email) + ').</p><p class="muted">Màn tạm — làm ở task 4.1.</p>' +
-          '<button class="btn btn-secondary btn-block" id="tmp-logout">Đăng xuất</button>', { title: 'Phiên khách' }) + '</main>';
-      $(root, '#tmp-logout').addEventListener('click', function () { TTV.api.logout().then(function () { TTV.Router.navigate('/login'); }); });
-    });
-  });
 })(window.TTV);
