@@ -14,16 +14,10 @@ TTV.ready = TTV.Store.ready().then(function () { return TTV.Seed.run(); }).then(
 
 (function (TTV) {
   function stub(title, tab) {
-    return function (ctx) {
-      var C = TTV.Components, app = document.getElementById('app'), extra = '';
+    return function () {
+      var C = TTV.Components, app = document.getElementById('app');
       app.classList.remove('is-wide');
-      if (ctx.path === '/create/order') {
-        extra += '<p>Dịch vụ: <strong>' + C.escape(ctx.query.service || 'chưa chọn') + '</strong></p>';
-        var pasted = '';
-        try { pasted = sessionStorage.getItem(TTV.screens.home.pasteKey) || ''; } catch (_) {}
-        if (pasted) extra += '<p>Điểm trả đã dán: ' + C.escape(pasted) + '</p>';
-      }
-      app.innerHTML = C.header(title, { back: true }) + '<main class="page">' + extra +
+      app.innerHTML = C.header(title, { back: true }) + '<main class="page">' +
         C.notice('Màn hình này sẽ được làm đầy đủ ở các task tiếp theo.', 'Sắp có') + '</main>' + C.bottomTab(tab || '');
     };
   }
@@ -54,14 +48,22 @@ TTV.ready = TTV.Store.ready().then(function () { return TTV.Seed.run(); }).then(
   TTV.Router.add('/home', function () {
     TTV.screens.home.render(document.getElementById('app'));
   }, { roles: ['CUSTOMER'], loginRoute: '/login', deniedRoute: '/login', destroy: function () { TTV.screens.home.destroy(); } });
-  TTV.Router.add('/create/order', stub('Đặt đơn bốc vác', 'home'), { roles: ['CUSTOMER'], loginRoute: '/login', deniedRoute: '/login' });
-  TTV.Router.add('/notifications', stub('Thông báo', 'home'));
-  TTV.Router.add('/coupons', stub('Mã giảm giá', 'home'));
-  TTV.Router.add('/wallet', stub('Ví của tôi', 'wallet'));
-  TTV.Router.add('/orders', stub('Đơn hàng', 'history'));
+
+  TTV.Router.add('/create/order', function (ctx) {
+    TTV.screens.createOrder.render(document.getElementById('app'), ctx);
+  }, { roles: ['CUSTOMER'], loginRoute: '/login', deniedRoute: '/login', destroy: function () { TTV.screens.createOrder.destroy(); } });
+
+  TTV.Router.add('/notifications', stub('Thông báo', 'home'), { roles: ['CUSTOMER'], loginRoute: '/login', deniedRoute: '/login' });
+  TTV.Router.add('/coupons', stub('Mã giảm giá', 'home'), { roles: ['CUSTOMER'], loginRoute: '/login', deniedRoute: '/login' });
+  TTV.Router.add('/wallet', stub('Ví của tôi', 'wallet'), { roles: ['CUSTOMER'], loginRoute: '/login', deniedRoute: '/login' });
+  TTV.Router.add('/orders', stub('Đơn hàng', 'history'), { roles: ['CUSTOMER'], loginRoute: '/login', deniedRoute: '/login' });
+  TTV.Router.add('/profile', stub('Cá nhân', 'profile'), { roles: ['CUSTOMER'], loginRoute: '/login', deniedRoute: '/login' });
+  TTV.Router.add('/address/new', function () {
+    TTV.screens.addressForm.render(document.getElementById('app'));
+  }, { roles: ['CUSTOMER'], loginRoute: '/login', deniedRoute: '/login', destroy: function () { TTV.screens.addressForm.destroy(); } });
   TTV.Router.add('/', function () {
-    var app = document.getElementById('app');
-    app.innerHTML = TTV.Components.header('TingTingVac',{back:false,large:true}) + '<main class="page">' + TTV.Components.card('<p>Khung ứng dụng đã sẵn sàng.</p><p class="muted">Nền tảng, lưu trữ, upload và tiện ích dùng chung đã có thể kiểm tra.</p><button class="btn btn-primary btn-block" data-route="/sim/components">Mở trang thử component</button><button class="btn btn-secondary btn-block" data-route="/sim/upload">Kiểm tra upload & tiện ích</button><button class="btn btn-primary btn-block" data-route="/login">Đăng nhập khách (task 2.2)</button>','Bắt đầu') + TTV.Components.notice('Đây là bản demo frontend; các màn nghiệp vụ sẽ được triển khai ở những task tiếp theo.') + '</main>';
+    var session = TTV.auth && typeof TTV.auth.getSession === 'function' ? TTV.auth.getSession() : null;
+    TTV.Router.navigate(session && session.role === 'CUSTOMER' ? '/home' : '/login', { replace: true });
   });
 
   TTV.Router.on404(function (ctx) { TTV.Router.render404(ctx); });

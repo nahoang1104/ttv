@@ -377,20 +377,61 @@ window.TTV = window.TTV || {};
       });
     });
   };
+
   api.listBanners = function () {
     return store().list('banners').then(function (rows) {
       return (rows || []).filter(function (row) { return row.active !== false; })
         .sort(function (a, b) { return (Number(a.sort) || 0) - (Number(b.sort) || 0); });
     });
   };
+
   api.getSetting = function (key) {
     return store().get('app_settings', key).then(function (row) {
       return row ? row.value : null;
     });
   };
+
   api.unreadNotificationCount = function () {
     return store().query('notifications', { is_read: false }).then(function (rows) {
       return (rows || []).length;
+    });
+  };
+
+  api.listAddresses = function () {
+    return store().list('addresses');
+  };
+
+  api.getAddress = function (id) {
+    return store().get('addresses', id);
+  };
+
+  api.saveAddress = function (payload) {
+    payload = payload || {};
+    var row = {
+      id: payload.id || TTV.Utils.id(),
+      user_id: payload.user_id || 'local-demo',
+      label: String(payload.label || '').trim().slice(0, 80),
+      type: payload.type || 'home',
+      detail: String(payload.detail || '').trim().slice(0, 250),
+      lat: payload.lat == null ? null : Number(payload.lat),
+      lng: payload.lng == null ? null : Number(payload.lng),
+      contact_name: String(payload.contact_name || '').trim(),
+      contact_phone: String(payload.contact_phone || '').trim(),
+      is_default: !!payload.is_default
+    };
+    if (!row.label || !row.detail) return Promise.reject(new Error('Nhập tên gợi nhớ và địa chỉ chi tiết.'));
+    return store().list('addresses').then(function (rows) {
+      var ops = [];
+      if (row.is_default) {
+        (rows || []).forEach(function (item) {
+          if (item.id !== row.id && item.is_default) {
+            item.is_default = false;
+            ops.push(store().put('addresses', item));
+          }
+        });
+      }
+      ops.push(store().put('addresses', row));
+      return Promise.all(ops).then(function () { return row; });
     });
   };
 })(window.TTV);
