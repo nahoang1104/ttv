@@ -24,9 +24,7 @@ window.TTV = window.TTV || {};
       'home.banner.cta': 'Tham gia ngay',
       'home.banner.member': 'Ưu đãi Hội viên',
       'home.banner.memberSub': 'Tiết kiệm đến 20% mọi đơn bốc vác',
-      'home.banner.promo': 'Ưu đãi khách mới',
-      'home.explore.card1': 'Bốc vác công kênh chuyên nghiệp',
-      'home.explore.card2': 'Khai giá hàng hóa là gì?'
+      'home.banner.promo': 'Ưu đãi khách mới'
     },
     en: { 'common.loading': 'Loading…', 'common.save': 'Save', 'common.cancel': 'Cancel', 'common.error': 'An error occurred' }
   };

@@ -6,6 +6,7 @@ TTV.screens = TTV.screens || {};
   var PASTE_KEY = 'ttv_draft_dropoff';
   var carouselTimer = null;
   var carouselEl = null;
+  var exploreEl = null;
 
   function t(key) { return TTV.I18n ? TTV.I18n.t(key) : key; }
   function esc(v) { return TTV.Components.escape(v); }
@@ -41,12 +42,7 @@ TTV.screens = TTV.screens || {};
     return '<svg class="home-hero__skyline" viewBox="0 0 220 120" aria-hidden="true"><g fill="#fff" opacity=".22"><rect x="118" y="48" width="18" height="72" rx="1"/><rect x="140" y="28" width="28" height="92" rx="1"/><rect x="172" y="40" width="22" height="80" rx="1"/><path d="M88 78h26v42H88z"/><path d="M148 18l14-12 14 12v10h-28z"/></g><g fill="#b9e4ff" opacity=".55"><rect x="146" y="40" width="4" height="6"/><rect x="154" y="40" width="4" height="6"/><rect x="146" y="50" width="4" height="6"/><rect x="154" y="50" width="4" height="6"/></g></svg>';
   }
 
-  function defaultExplore() {
-    return [
-      { title: t('home.explore.card1'), tone: 'green' },
-      { title: t('home.explore.card2'), tone: 'blue' }
-    ];
-  }
+  var EXPLORE_IMG = 'uploads/img-giaodien/item1.png';
 
   function bannerSlide(banner) {
     var type = banner.type || 'promo';
@@ -119,6 +115,38 @@ TTV.screens = TTV.screens || {};
     syncDots();
   }
 
+  function bindExploreDrag(root) {
+    exploreEl = root.querySelector('[data-home-explore]');
+    if (!exploreEl) return;
+    var dragging = false, startX = 0, startLeft = 0;
+    function onDown(e) {
+      dragging = true;
+      startX = e.clientX;
+      startLeft = exploreEl.scrollLeft;
+      exploreEl.classList.add('is-dragging');
+      if (exploreEl.setPointerCapture && e.pointerId != null) exploreEl.setPointerCapture(e.pointerId);
+    }
+    function onMove(e) {
+      if (!dragging) return;
+      e.preventDefault();
+      exploreEl.scrollLeft = startLeft - (e.clientX - startX);
+    }
+    function onUp() {
+      dragging = false;
+      exploreEl.classList.remove('is-dragging');
+    }
+    exploreEl.addEventListener('pointerdown', onDown);
+    exploreEl.addEventListener('pointermove', onMove);
+    exploreEl.addEventListener('pointerup', onUp);
+    exploreEl.addEventListener('pointercancel', onUp);
+    exploreEl._off = function () {
+      exploreEl.removeEventListener('pointerdown', onDown);
+      exploreEl.removeEventListener('pointermove', onMove);
+      exploreEl.removeEventListener('pointerup', onUp);
+      exploreEl.removeEventListener('pointercancel', onUp);
+    };
+  }
+
   function markup(data) {
     var unread = data.unread > 0;
     var services = data.services || [];
@@ -165,9 +193,11 @@ TTV.screens = TTV.screens || {};
       '</section>' +
       '<section class="home-explore">' +
         '<h2>' + esc(t('home.explore')) + '</h2>' +
-        '<div class="home-explore__scroller">' + defaultExplore().map(function (card) {
-          return '<article class="home-explore-card home-explore-card--' + esc(card.tone) + '"><p>' + esc(card.title) + '</p></article>';
-        }).join('') + '</div>' +
+        '<div class="home-explore__scroller" data-home-explore>' +
+          [0, 1, 2].map(function () {
+            return '<article class="home-explore-card"><img src="' + EXPLORE_IMG + '" alt=""></article>';
+          }).join('') +
+        '</div>' +
       '</section>' +
       '<a class="zalo-fab" href="' + esc(zalo) + '" target="_blank" rel="noopener noreferrer" aria-label="Zalo">Zalo</a>' +
       TTV.Components.bottomTab('home') +
@@ -204,6 +234,7 @@ TTV.screens = TTV.screens || {};
           unread: parts[3] || 0
         });
         bindCarousel(container);
+        bindExploreDrag(container);
         container.addEventListener('click', onClick);
         container._homeClick = onClick;
       }).catch(function (err) {
@@ -213,6 +244,8 @@ TTV.screens = TTV.screens || {};
     destroy: function () {
       if (carouselTimer) { clearInterval(carouselTimer); carouselTimer = null; }
       carouselEl = null;
+      if (exploreEl && exploreEl._off) exploreEl._off();
+      exploreEl = null;
       var app = document.getElementById('app');
       if (app && app._homeClick) {
         app.removeEventListener('click', app._homeClick);
