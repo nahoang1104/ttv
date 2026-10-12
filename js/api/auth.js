@@ -69,7 +69,7 @@ window.TTV = window.TTV || {};
       else sessionStorage.removeItem(SESSION_KEY);
     } catch (_) { /* sessionStorage bị chặn: bỏ qua, phiên chỉ sống trong bộ nhớ DB */ }
   }
-  // account = { type:'customer'|'vendor'|'staff', id, role:'CUSTOMER'|'VENDOR'|'SUPER_ADMIN'|'ADMIN'|'SUPPORT', name }
+  // account = { type:'customer'|'vendor'|'staff', id, role:'CUSTOMER'|'VENDOR'|'SUPER_ADMIN', name }
   function createSession(account) {
     if (!account || !account.type || !account.id || !account.role) return Promise.reject(new Error('Thiếu thông tin tài khoản để tạo phiên.'));
     var info = deviceInfo(), now = new Date().toISOString();

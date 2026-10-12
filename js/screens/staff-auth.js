@@ -130,7 +130,7 @@ window.TTV = window.TTV || {};
       $(root, '#tmp-logout').addEventListener('click', function () { TTV.api.logout().then(function () { TTV.Router.navigate('/staff-login'); }); });
     };
   }
-  var staffRoute = { roles: ['SUPER_ADMIN', 'ADMIN', 'SUPPORT'], loginRoute: '/staff-login', deniedRoute: '/staff-login' };
+  var staffRoute = { roles: ['SUPER_ADMIN'], loginRoute: '/staff-login', deniedRoute: '/staff-login' };
   var vendorRoute = { roles: ['VENDOR'], loginRoute: '/staff-login', deniedRoute: '/staff-login' };
 
   TTV.screens.staffAuth = { renderStaffLogin: renderStaffLogin, renderChangePassword: renderChangePassword };

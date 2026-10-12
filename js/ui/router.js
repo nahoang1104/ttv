@@ -36,7 +36,7 @@ window.TTV = window.TTV || {};
   /* ===== Guard theo vai trò (task 2.5) =====
      Mỗi khu vực khai báo tiền tố route + vai trò được vào + trang đăng nhập tương ứng.
      Route không thuộc khu nào (/, /sim/*) là công khai. Chỉ là rào cản phía trình duyệt (demo). */
-  var STAFF = ['SUPER_ADMIN', 'ADMIN', 'SUPPORT'];
+  var STAFF = ['SUPER_ADMIN']; // chỉ 1 vai trò admin duy nhất
   var AREAS = [
     { name: 'customer', roles: ['CUSTOMER'], login: '/login', prefixes: ['/home', '/onboarding', '/create', '/notifications', '/address', '/orders', '/coupons', '/wallet', '/pay', '/profile', '/settings', '/payment-methods', '/reviews', '/security', '/reports', '/help', '/faq', '/policies'] },
     { name: 'vendor', roles: ['VENDOR'], login: '/staff-login', prefixes: ['/vendor'] },

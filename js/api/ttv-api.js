@@ -215,7 +215,7 @@ window.TTV = window.TTV || {};
     }).then(function (user) { TTV.auth.updateSession({ name: user.name }); return user; });
   };
 
-  var STAFF_ROLES = ['SUPER_ADMIN', 'ADMIN', 'SUPPORT'];
+  var STAFF_ROLES = ['SUPER_ADMIN']; // chỉ 1 vai trò admin duy nhất
   var STAFF_MAX_FAILS = 5, STAFF_LOCK_MS = 5 * 60 * 1000;
   api.STAFF_ROLES = STAFF_ROLES;
   api.homeRouteFor = function (role) {
@@ -432,6 +432,276 @@ window.TTV = window.TTV || {};
       }
       ops.push(store().put('addresses', row));
       return Promise.all(ops).then(function () { return row; });
+    });
+  };
+
+  /* ===== 3.3 Tạo tài khoản thợ (admin) ===== */
+  // Loại nhà cung cấp và giới hạn số thợ theo loại (cá nhân luôn là 1 thợ).
+  api.VENDOR_TYPES = [{ value: 'personal', label: 'Cá nhân' }, { value: 'team', label: 'Tổ đội' }, { value: 'company', label: 'Công ty' }];
+  api.VENDOR_TEAM_LIMITS = { personal: { min: 1, max: 1 }, team: { min: 2, max: 50 }, company: { min: 2, max: 500 } };
+  // Khu vực hoạt động. TẠM: quận/huyện TP.HCM + "Toàn TP.HCM" (giá trị 'Ho Chi Minh City' khớp seed); chờ chốt ở mục 11 (Câu hỏi mở).
+  api.VENDOR_CITY_AREA = 'Ho Chi Minh City';
+  api.VENDOR_AREAS = [{ value: 'Ho Chi Minh City', label: 'Toàn TP.HCM' }].concat([
+    'Quận 1', 'Quận 3', 'Quận 4', 'Quận 5', 'Quận 6', 'Quận 7', 'Quận 8', 'Quận 10', 'Quận 11', 'Quận 12',
+    'Bình Thạnh', 'Gò Vấp', 'Phú Nhuận', 'Tân Bình', 'Tân Phú', 'Bình Tân', 'TP. Thủ Đức',
+    'Bình Chánh', 'Củ Chi', 'Hóc Môn', 'Nhà Bè', 'Cần Giờ'
+  ].map(function (n) { return { value: n, label: n }; }));
+  api.VENDOR_VEHICLES = ['Xe máy', 'Xe ba gác', 'Xe bán tải', 'Xe tải nhỏ', 'Xe tải 1.5 tấn', 'Xe tải 2.5 tấn'];
+  var USERNAME_RE = /^[a-z0-9][a-z0-9._-]{3,29}$/;
+  var COMMISSION_RE = /^\d{1,3}(?:[.,]\d{1,2})?$/;
+
+  // Mật khẩu tạm ngẫu nhiên (crypto), bỏ ký tự dễ nhầm (0/O, 1/l/I); luôn có chữ hoa, chữ thường và số.
+  var PW_UPPER = 'ABCDEFGHJKLMNPQRSTUVWXYZ', PW_LOWER = 'abcdefghijkmnpqrstuvwxyz', PW_DIGIT = '23456789';
+  function randomInt(max) { // 0..max-1, không lệch (loại mẫu rơi vào phần dư)
+    var limit = Math.floor(0x100000000 / max) * max, buf = new Uint32Array(1);
+    do { crypto.getRandomValues(buf); } while (buf[0] >= limit);
+    return buf[0] % max;
+  }
+  function pickChar(chars) { return chars.charAt(randomInt(chars.length)); }
+  api.generateTempPassword = function (length) {
+    length = Math.max(8, Math.min(32, Number(length) || 10));
+    var all = PW_UPPER + PW_LOWER + PW_DIGIT, out = [pickChar(PW_UPPER), pickChar(PW_LOWER), pickChar(PW_DIGIT), pickChar(PW_DIGIT)];
+    while (out.length < length) out.push(pickChar(all));
+    for (var i = out.length - 1; i > 0; i--) { var j = randomInt(i + 1), tmp = out[i]; out[i] = out[j]; out[j] = tmp; } // xáo trộn
+    return out.join('');
+  };
+
+  // Tên đăng nhập: chữ thường không dấu, số, . _ - (4–30 ký tự). Trả '' nếu hợp lệ.
+  api.validateUsername = function (input) {
+    var u = String(input == null ? '' : input).trim().toLowerCase();
+    if (!u) return 'Vui lòng nhập tên đăng nhập.';
+    if (!USERNAME_RE.test(u)) return 'Tên đăng nhập gồm 4–30 ký tự: chữ thường không dấu, số, dấu chấm, gạch dưới hoặc gạch ngang; bắt đầu bằng chữ hoặc số.';
+    return '';
+  };
+  function vendorSession() { var s = TTV.auth.getSession(); return s && s.role === 'SUPER_ADMIN' ? s : null; }
+  function sameUsername(row, u) { return String(row.username || '').toLowerCase() === u; }
+  // Tên đăng nhập dùng chung giữa staff và thợ (đăng nhập tìm cả hai bảng) nên phải duy nhất trên cả hai.
+  api.isUsernameTaken = function (input) {
+    var u = String(input == null ? '' : input).trim().toLowerCase();
+    return Promise.all([TTV.Store.list('staff'), TTV.Store.list('vendors')]).then(function (r) {
+      return r[0].concat(r[1]).some(function (row) { return sameUsername(row, u); });
+    });
+  };
+
+  // Kiểm tra dữ liệu (không đụng DB). Trả { ok, errors:{trường:thông báo}, value:{dữ liệu đã chuẩn hóa} }.
+  api.validateVendorInput = function (data, opts) {
+    data = data || {}; opts = opts || {};
+    var withAccount = opts.account !== false; // sửa thông tin: không đụng tên đăng nhập và mật khẩu
+    var errors = {}, v = {};
+    var type = String(data.type || '');
+    if (!api.VENDOR_TYPES.some(function (t) { return t.value === type; })) errors.type = 'Vui lòng chọn loại nhà cung cấp.';
+    v.type = type;
+
+    var name = String(data.name == null ? '' : data.name).trim().replace(/\s+/g, ' ');
+    if (!name) errors.name = 'Vui lòng nhập tên.';
+    else if (name.length < 2) errors.name = 'Tên cần ít nhất 2 ký tự.';
+    else if (name.length > 80) errors.name = 'Tên tối đa 80 ký tự.';
+    v.name = name;
+
+    var phone = normalizePhone(data.phone);
+    if (!String(data.phone == null ? '' : data.phone).trim()) errors.phone = 'Vui lòng nhập số điện thoại.';
+    else if (!phone.ok) errors.phone = phone.error;
+    v.phone = phone.ok ? phone.local : ''; // thợ lưu dạng 0xxxxxxxxx (như seed)
+
+    var email = String(data.email == null ? '' : data.email).trim();
+    if (!email) errors.email = 'Vui lòng nhập email.';
+    else if (!api.isValidEmail(email)) errors.email = 'Email không hợp lệ.';
+    v.email = email;
+
+    if (withAccount) {
+      var uMsg = api.validateUsername(data.username);
+      if (uMsg) errors.username = uMsg;
+      v.username = String(data.username == null ? '' : data.username).trim().toLowerCase();
+
+      var pw = String(data.password == null ? '' : data.password);
+      var pwMsg = api.validatePassword(pw) || (/\s/.test(pw) ? 'Mật khẩu không được chứa khoảng trắng.' : '');
+      if (pwMsg) errors.password = pwMsg;
+      v.password = pw;
+    }
+
+    var lim = api.VENDOR_TEAM_LIMITS[type];
+    if (lim) {
+      var size = type === 'personal' ? 1 : Number(data.team_size);
+      if (!(Number.isInteger(size) && size >= lim.min && size <= lim.max)) errors.team_size = 'Số thợ phải là số nguyên từ ' + lim.min + ' đến ' + lim.max + '.';
+      v.team_size = size;
+    }
+
+    function uniqueStrings(list) { var out = []; (Array.isArray(list) ? list : []).forEach(function (x) { x = String(x); if (out.indexOf(x) < 0) out.push(x); }); return out; }
+    v.services = uniqueStrings(data.services);
+    if (!v.services.length) errors.services = 'Chọn ít nhất 1 dịch vụ.';
+    v.areas = uniqueStrings(data.areas);
+    if (!v.areas.length) errors.areas = 'Chọn ít nhất 1 khu vực hoạt động.';
+    else if (v.areas.some(function (a) { return !api.VENDOR_AREAS.some(function (x) { return x.value === a; }); })) errors.areas = 'Có khu vực không hợp lệ.';
+
+    var vehicle = String(data.vehicle == null ? '' : data.vehicle).trim().replace(/\s+/g, ' ');
+    if (vehicle.length > 60) errors.vehicle = 'Phương tiện tối đa 60 ký tự.';
+    v.vehicle = vehicle;
+
+    // Hoa hồng riêng: để trống = dùng mức mặc định (app_settings.commission_default) → lưu null.
+    var rate = data.commission_rate == null ? '' : String(data.commission_rate).trim();
+    if (!rate) v.commission_rate = null;
+    else if (!COMMISSION_RE.test(rate) || Number(rate.replace(',', '.')) > 100) { errors.commission_rate = 'Hoa hồng phải từ 0 đến 100 (%).'; v.commission_rate = null; }
+    else v.commission_rate = Math.round(Number(rate.replace(',', '.')) * 100) / 100;
+
+    return { ok: Object.keys(errors).length === 0, errors: errors, value: v };
+  };
+
+  // Kiểm tra trùng tên đăng nhập / SĐT bằng dữ liệu đọc mới nhất.
+  function vendorConflicts(v, ignoreId) {
+    return Promise.all([TTV.Store.list('vendors'), TTV.Store.list('staff')]).then(function (r) {
+      var errs = {};
+      if (v.username && r[0].concat(r[1]).some(function (row) { return sameUsername(row, v.username); })) errs.username = 'Tên đăng nhập đã được sử dụng.';
+      if (v.phone && r[0].some(function (row) { if (ignoreId && row.id === ignoreId) return false; var n = normalizePhone(row.phone); return n.ok && n.local === v.phone; })) errs.phone = 'Số điện thoại này đã có tài khoản thợ.';
+      return errs;
+    });
+  }
+
+  // Tạo tài khoản thợ (chỉ SUPER_ADMIN). Mật khẩu tạm chỉ được băm, không lưu bản rõ. Lỗi dữ liệu: code 'VALIDATION' kèm err.errors.
+  api.createVendor = function (data) {
+    var s = vendorSession();
+    if (!s) return Promise.reject(fail('FORBIDDEN', 'Bạn không có quyền tạo tài khoản thợ.'));
+    var res = api.validateVendorInput(data);
+    return Promise.all([TTV.Store.list('services'), vendorConflicts(res.value)]).then(function (r) {
+      var codes = r[0].map(function (x) { return x.code || x.id; });
+      if (!res.errors.services && res.value.services.some(function (c) { return codes.indexOf(c) < 0; })) res.errors.services = 'Có dịch vụ không hợp lệ.';
+      Object.keys(r[1]).forEach(function (k) { if (!res.errors[k]) res.errors[k] = r[1][k]; });
+      if (Object.keys(res.errors).length) throw fail('VALIDATION', 'Vui lòng kiểm tra lại các trường được đánh dấu.', { errors: res.errors });
+      return TTV.auth.makeCredentials(res.value.password);
+    }).then(function (cred) {
+      // KIO không có giao dịch: đọc lại ngay trước khi ghi để tránh trùng do tab khác vừa tạo.
+      return vendorConflicts(res.value).then(function (errs) {
+        if (Object.keys(errs).length) throw fail('VALIDATION', 'Vui lòng kiểm tra lại các trường được đánh dấu.', { errors: errs });
+        var v = res.value;
+        var record = {
+          id: TTV.Utils.id(), name: v.name, type: v.type, username: v.username, phone: v.phone, email: v.email,
+          rating: 0, jobs_done: 0, team_size: v.team_size, services: v.services, areas: v.areas, vehicle: v.vehicle,
+          commission_rate: v.commission_rate, is_online: false, status: 'active', kyc_status: 'pending',
+          must_change_pw: true, wallet_balance: 0, avatar_path: '', created_by: s.account_id, created_at: new Date().toISOString()
+        };
+        return TTV.Store.put('vendors', Object.assign(record, cred));
+      });
+    }).then(function (saved) {
+      var detail = { username: saved.username, name: saved.name, type: saved.type, team_size: saved.team_size, services: saved.services, areas: saved.areas, commission_rate: saved.commission_rate };
+      return TTV.Utils.audit('vendor.create', { target_table: 'vendors', target_id: saved.id, detail: detail }).catch(function (e) { console.warn('[TTV] audit vendor.create:', e); }).then(function () {
+        var safe = Object.assign({}, saved); delete safe.password_hash; delete safe.salt; return safe;
+      });
+    });
+  };
+  /* ===== 3.4 Danh sách, chi tiết, khóa/mở, reset mật khẩu, sửa thông tin thợ (admin) ===== */
+  // Không bao giờ trả salt/hash ra màn hình.
+  function publicVendor(row) {
+    if (!row) return null;
+    var o = Object.assign({}, row); delete o.password_hash; delete o.salt;
+    o.has_password = !!row.password_hash;
+    if (!o.status) o.status = 'active';
+    return o;
+  }
+  function adminGuard(message) {
+    return vendorSession() ? null : fail('FORBIDDEN', message || 'Bạn không có quyền thực hiện thao tác này.');
+  }
+  function notFoundVendor() { return fail('NOT_FOUND', 'Không tìm thấy tài khoản thợ.'); }
+  function auditSafe(action, details) {
+    return TTV.Utils.audit(action, details).catch(function (e) { console.warn('[TTV] audit ' + action + ':', e); });
+  }
+  // Xóa các phiên đăng nhập của một tài khoản (khóa / reset mật khẩu). Phiên trong sessionStorage của tab khác sẽ bị hủy ở lần tải lại (validateSession).
+  function dropAccountSessions(type, id) {
+    return TTV.Store.query('sessions', function (r) { return r.account_type === type && String(r.account_id) === String(id); }).then(function (rows) {
+      return Promise.all((rows || []).map(function (r) { return TTV.Store.remove('sessions', r.id); }));
+    });
+  }
+
+  api.listVendors = function () {
+    var err = adminGuard('Bạn không có quyền xem danh sách thợ.');
+    if (err) return Promise.reject(err);
+    return TTV.Store.list('vendors').then(function (rows) {
+      return (rows || []).map(publicVendor).sort(function (a, b) {
+        var ta = a.created_at || '', tb = b.created_at || '';
+        if (ta !== tb) return ta < tb ? 1 : -1; // mới tạo lên đầu; thợ mẫu (không có ngày) xuống cuối
+        return String(a.name || '').localeCompare(String(b.name || ''), 'vi');
+      });
+    });
+  };
+  api.getVendor = function (id) {
+    var err = adminGuard('Bạn không có quyền xem thông tin thợ.');
+    if (err) return Promise.reject(err);
+    return TTV.Store.get('vendors', String(id)).then(publicVendor);
+  };
+
+  // Khóa / mở khóa. Khóa: chặn đăng nhập, tắt "sẵn sàng", hủy các phiên đang có. status: 'locked' | 'active'.
+  api.setVendorStatus = function (id, status, reason) {
+    var err = adminGuard('Bạn không có quyền khóa hoặc mở khóa tài khoản thợ.');
+    if (err) return Promise.reject(err);
+    if (status !== 'locked' && status !== 'active') return Promise.reject(fail('VALIDATION', 'Trạng thái không hợp lệ.'));
+    reason = String(reason == null ? '' : reason).trim().replace(/\s+/g, ' ');
+    if (reason.length > 200) return Promise.reject(fail('VALIDATION', 'Lý do tối đa 200 ký tự.'));
+    return TTV.Store.get('vendors', String(id)).then(function (row) {
+      if (!row) throw notFoundVendor();
+      if ((row.status || 'active') === status) return row; // đã đúng trạng thái, không ghi lại
+      var now = new Date().toISOString();
+      var saved = Object.assign({}, row, { status: status, updated_at: now });
+      if (status === 'locked') { saved.is_online = false; saved.locked_at = now; saved.lock_reason = reason; }
+      else { saved.locked_at = null; saved.lock_reason = ''; }
+      return TTV.Store.put('vendors', saved).then(function (v) {
+        var after = status === 'locked' ? dropAccountSessions('vendor', v.id) : Promise.resolve();
+        return after.then(function () {
+          return auditSafe(status === 'locked' ? 'vendor.lock' : 'vendor.unlock', { target_table: 'vendors', target_id: v.id, detail: { username: v.username, reason: reason } });
+        }).then(function () { return v; });
+      });
+    }).then(publicVendor);
+  };
+
+  // Reset mật khẩu: sinh mật khẩu tạm mới, ép đổi ở lần đăng nhập kế tiếp, hủy phiên cũ, gỡ khóa đăng nhập sai. Trả mật khẩu rõ MỘT lần, không lưu.
+  api.resetVendorPassword = function (id) {
+    var err = adminGuard('Bạn không có quyền đặt lại mật khẩu thợ.');
+    if (err) return Promise.reject(err);
+    return TTV.Store.get('vendors', String(id)).then(function (row) {
+      if (!row) throw notFoundVendor();
+      if (!row.username) throw fail('NO_USERNAME', 'Tài khoản thợ này chưa có tên đăng nhập.');
+      var password = api.generateTempPassword();
+      return TTV.auth.makeCredentials(password).then(function (cred) {
+        return TTV.Store.get('vendors', row.id).then(function (fresh) { // đọc lại ngay trước khi ghi
+          if (!fresh) throw notFoundVendor();
+          return TTV.Store.put('vendors', Object.assign({}, fresh, cred, { must_change_pw: true, updated_at: new Date().toISOString() }));
+        });
+      }).then(function (saved) {
+        return Promise.all([dropAccountSessions('vendor', saved.id), TTV.Store.remove('__meta', failKey(String(saved.username).toLowerCase()))]).then(function () {
+          return auditSafe('vendor.reset_password', { target_table: 'vendors', target_id: saved.id, detail: { username: saved.username } }); // không ghi mật khẩu
+        }).then(function () { return { vendor: publicVendor(saved), username: saved.username, password: password }; });
+      });
+    });
+  };
+
+  // Sửa thông tin (không đổi tên đăng nhập, không đụng mật khẩu / ví / đánh giá). Trả { vendor, changed:[tên trường] }.
+  var EDIT_FIELDS = ['type', 'name', 'phone', 'email', 'team_size', 'services', 'areas', 'vehicle', 'commission_rate'];
+  var EDIT_HIDDEN = ['phone', 'email']; // thay đổi được ghi nhận nhưng không lưu giá trị vào audit_logs
+  api.updateVendor = function (id, data) {
+    var err = adminGuard('Bạn không có quyền sửa thông tin thợ.');
+    if (err) return Promise.reject(err);
+    var res = api.validateVendorInput(data, { account: false });
+    return Promise.all([TTV.Store.list('services'), vendorConflicts(res.value, String(id))]).then(function (r) {
+      var codes = r[0].map(function (x) { return x.code || x.id; });
+      if (!res.errors.services && res.value.services.some(function (c) { return codes.indexOf(c) < 0; })) res.errors.services = 'Có dịch vụ không hợp lệ.';
+      Object.keys(r[1]).forEach(function (k) { if (!res.errors[k]) res.errors[k] = r[1][k]; });
+      if (Object.keys(res.errors).length) throw fail('VALIDATION', 'Vui lòng kiểm tra lại các trường được đánh dấu.', { errors: res.errors });
+      return TTV.Store.get('vendors', String(id));
+    }).then(function (fresh) {
+      if (!fresh) throw notFoundVendor();
+      return vendorConflicts(res.value, fresh.id).then(function (errs) { // đọc lại ngay trước khi ghi
+        if (Object.keys(errs).length) throw fail('VALIDATION', 'Vui lòng kiểm tra lại các trường được đánh dấu.', { errors: errs });
+        var v = res.value, next = {}, changed = [], changes = {};
+        EDIT_FIELDS.forEach(function (k) {
+          next[k] = v[k];
+          if (JSON.stringify(fresh[k] == null ? null : fresh[k]) !== JSON.stringify(v[k] == null ? null : v[k])) {
+            changed.push(k);
+            if (EDIT_HIDDEN.indexOf(k) < 0) changes[k] = { from: fresh[k] == null ? null : fresh[k], to: v[k] };
+          }
+        });
+        if (!changed.length) return { vendor: publicVendor(fresh), changed: [] };
+        return TTV.Store.put('vendors', Object.assign({}, fresh, next, { updated_at: new Date().toISOString() })).then(function (saved) {
+          return auditSafe('vendor.update', { target_table: 'vendors', target_id: saved.id, detail: { username: saved.username, fields: changed, changes: changes } })
+            .then(function () { return { vendor: publicVendor(saved), changed: changed }; });
+        });
+      });
     });
   };
 })(window.TTV);
