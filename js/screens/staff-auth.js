@@ -136,6 +136,5 @@ window.TTV = window.TTV || {};
   TTV.screens.staffAuth = { renderStaffLogin: renderStaffLogin, renderChangePassword: renderChangePassword };
   TTV.Router.add('/staff-login', renderStaffLogin);
   TTV.Router.add('/change-password', renderChangePassword);
-  TTV.Router.add('/admin', placeholder('Quản trị', 'Màn tạm — khung admin làm ở task 3.1.'), staffRoute);
   TTV.Router.add('/vendor', placeholder('Khu thợ', 'Màn tạm — khung app thợ làm ở task 5.1.'), vendorRoute);
 })(window.TTV);

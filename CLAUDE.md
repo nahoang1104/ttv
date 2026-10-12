@@ -24,7 +24,7 @@ Web app giả lập mobile cho dịch vụ đặt thợ bốc vác. Có 3 vai tr
 - **Nguồn thiết kế**: file Excel gốc (27 màn hình, 44 ảnh, giao diện xanh dương, mobile-first, bottom tab 4 mục cho khách). 🆕 Ảnh đã được tách ra `docs/reference/` (2,8 MB, đã đặt tên theo màn hình). Phần mô tả trong Excel chỉ cho **khu khách**; khu thợ và admin do ta tự thiết kế.
 - **Tham chiếu kiến trúc**: repo HRM (README). **Chưa đọc được** `kio-api.js` và `store.js` của HRM (GitHub chặn truy cập tự động), nên lớp `store.js` hiện bám theo giao diện `list/get/put/remove/query`. Khi người dùng dán 2 file đó, chỉnh lại cho khớp.
 - **Công nghệ** 🆕 (theo mẫu repo `hrm-frontend`): JavaScript thuần, **script thường — không ES module**, không build, không framework, không bundler. Mọi module gắn vào namespace toàn cục `window.TTV`; `index.html` nạp `<script>` theo thứ tự (có `?v=N` để phá cache, thêm file mới vào `index.html` khi làm task). Cấu hình ở `window.TTV_CONFIG` trong `index.html` (`mode`, `prefix`, `seedUser`, `seedPassword`). **Chạy bằng web server tĩnh, không dùng Python**: `npx serve .` hoặc XAMPP (mở qua http, không `file://`). Chỉ một file CSS `css/style.css`.
-- **Giao diện**: khung giả app mobile rộng tối đa 430px, căn giữa trên desktop. Router theo hash. Riêng admin dùng bố cục rộng (sidebar + bảng).
+- **Giao diện**: toàn bộ ứng dụng nằm trong khung giả lập app mobile rộng tối đa 430px, căn giữa trên desktop và chiếm toàn màn hình trên điện thoại. Router theo hash. Không có sidebar hoặc layout desktop rộng ở bất kỳ vai trò nào.
 - 🆕 **Phong cách thị giác (rút từ ảnh Excel, lấy mẫu pixel lại ở task 1.1)**:
   - Header trang con: nền gradient ngang xanh đậm → xanh nhạt (xấp xỉ `#0643A0` → `#60C0FB`), tiêu đề trắng căn giữa, nút quay lại `‹` bên trái; header lớn ở Trang chủ/Ví/Cá nhân bo góc dưới.
   - Màu chủ đạo xấp xỉ `#1B7BE4`; nút chính gradient xanh, bo tròn, **full width, dính đáy màn hình**; nút vô hiệu hóa màu xám.
@@ -70,11 +70,19 @@ Quy tắc phân lớp:
 
 ## 3. Vai trò, đăng nhập, route
 
+### Quy chuẩn giao diện bắt buộc: mọi khu vực đều là khung giả lập app mobile
+
+- **Toàn bộ giao diện ứng dụng** phải được trình bày bên trong khung thiết bị mobile giả lập: khu khách, khu thợ, khu admin, đăng nhập, đổi mật khẩu, onboarding, modal/bottom sheet và các màn phụ. Không tạo layout desktop kiểu website quản trị.
+- Khung có chiều rộng tối đa **430px**, căn giữa trên desktop; trên điện thoại thật sử dụng toàn bộ chiều rộng và chiều cao khả dụng. Không dùng `.is-wide`, sidebar hoặc bảng quản trị trải ngang.
+- Trên desktop chỉ phần nền bên ngoài khung được phép rộng; nội dung ứng dụng không vượt khỏi khung. Mọi danh sách, form, header, modal và điều hướng phải căn theo chiều rộng mobile.
+- Với dữ liệu dạng bảng, thiết kế **danh sách/thẻ mobile** là mặc định. Chỉ dùng bảng khi thực sự cần so sánh nhiều trường; khi đó bảng phải nằm trong vùng cuộn ngang có chủ đích bên trong khung, không làm rộng khung app.
+- Dùng chung quy tắc khung mobile cho mọi vai trò; màu sắc và điều hướng có thể khác theo vai trò nhưng kích thước và nguyên tắc responsive phải nhất quán. Không thay đổi API, nghiệp vụ hoặc route hiện có chỉ để phục vụ giao diện.
+
 | Vai trò | Đăng nhập | Route gốc | Giao diện |
 |---|---|---|---|
 | Khách (`CUSTOMER`) | `/login`: SĐT +84 + OTP, Zalo (demo), Google (demo) | `#/home`, `#/create/order`, `#/orders`… | Giả app mobile, bottom tab: Trang chủ / Ví / Lịch sử / Cá nhân |
 | Thợ (`VENDOR`) | `/staff-login`: username + mật khẩu do admin cấp, bắt đổi mật khẩu lần đầu | `#/vendor/*` | Giả app mobile riêng, có bottom tab |
-| Admin (`SUPER_ADMIN` / `ADMIN` / `SUPPORT`) | `/staff-login`: username + mật khẩu. Tài khoản đầu `admin` / `Admin@12345`, bắt đổi lần đầu | `#/admin/*` | Bảng quản trị rộng |
+| Admin (`SUPER_ADMIN` / `ADMIN` / `SUPPORT`) | `/staff-login`: username + mật khẩu. Tài khoản đầu `admin` / `Admin@12345`, bắt đổi lần đầu | `#/admin/*` | Cùng khung giả app mobile; không sidebar, điều hướng bottom tab + mục “Thêm” |
 
 - Mật khẩu băm SHA-256 + salt bằng `crypto.subtle`.
 - Session lưu theo tab (để mở 3 tab test 3 vai trò cùng lúc). Mỗi vai trò poll KIO 3–5 giây để thấy đơn mới, báo giá mới.
