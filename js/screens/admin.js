@@ -13,7 +13,7 @@
     { id:'reports', title:'Báo cáo', desc:'Báo cáo do người dùng gửi và báo cáo vận hành', icon:'⚑', group:'ops', roles:STAFF, route:'/admin/reports' },
     { id:'reviews', title:'Đánh giá', desc:'Đánh giá và phản hồi sau đơn hàng', icon:'★', group:'ops', roles:STAFF, route:'/admin/reviews' },
     { id:'notifications', title:'Thông báo', desc:'Gửi thông báo tới người dùng', icon:'♧', group:'ops', roles:STAFF, route:'/admin/notifications' },
-    { id:'pricing', title:'Giá & cấu hình', desc:'Đơn giá, hoa hồng và thiết lập hệ thống', icon:'⚙', group:'more', roles:STAFF, route:'/admin/settings' },
+    { id:'pricing', title:'Giá & cấu hình', desc:'Đơn giá, hoa hồng và thiết lập hệ thống', icon:'⚙', group:'more', roles:STAFF, route:'/admin/settings', own:true },
     { id:'content', title:'Nội dung ứng dụng', desc:'Banner, FAQ và chính sách', icon:'▤', group:'more', roles:STAFF, route:'/admin/content' },
     { id:'audit-logs', title:'Nhật ký hoạt động', desc:'Lịch sử thao tác quản trị', icon:'◷', group:'more', roles:STAFF, route:'/admin/audit-logs' }
   ];

@@ -108,7 +108,6 @@ window.TTV = window.TTV || {};
   function areaNames(v) {
     return (v.areas || []).map(function (a) { var x = TTV.api.VENDOR_AREAS.filter(function (y) { return y.value === a; })[0]; return x ? x.label : a; }).join(', ');
   }
-  function kycText(k) { return t(k === 'pending' || k === 'approved' || k === 'rejected' ? 'adminVendors.kyc.' + k : 'adminVendors.kyc.none'); }
   function detailHtml() {
     var v = detail.vendor, locked = isLocked(v), U = TTV.Utils;
     var badges = '<div class="admin-detail-badges">' + C.badge(typeLabel(v.type), 'info') + statusBadge(v) + (v.must_change_pw ? C.badge(t('adminVendors.mustChange'), 'warning') : '') + '</div>';
@@ -135,7 +134,6 @@ window.TTV = window.TTV || {};
       kv(t('adminVendors.field.status'), esc(t(online ? 'adminVendors.online' : 'adminVendors.offline'))) +
       kv(t('adminVendors.field.rating'), Number(v.rating) > 0 ? '★ ' + Number(v.rating).toFixed(1) : esc(t('adminVendors.noRating'))) +
       kv(t('adminVendors.field.jobs'), esc(t('adminVendors.jobs', { n: v.jobs_done || 0 }))) +
-      kv(t('adminVendors.field.kyc'), esc(kycText(v.kyc_status))) +
       kv(t('adminVendors.field.wallet'), esc(U.money(v.wallet_balance || 0))) +
       kv(t('adminVendors.field.created'), v.created_at ? esc(U.date(v.created_at)) : none()) + '</dl>';
     var pw = !v.has_password ? 'adminVendors.pw.missing' : (v.must_change_pw ? 'adminVendors.pw.temp' : 'adminVendors.pw.set');

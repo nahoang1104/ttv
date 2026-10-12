@@ -575,7 +575,7 @@ window.TTV = window.TTV || {};
         var record = {
           id: TTV.Utils.id(), name: v.name, type: v.type, username: v.username, phone: v.phone, email: v.email,
           rating: 0, jobs_done: 0, team_size: v.team_size, services: v.services, areas: v.areas, vehicle: v.vehicle,
-          commission_rate: v.commission_rate, is_online: false, status: 'active', kyc_status: 'pending',
+          commission_rate: v.commission_rate, is_online: false, status: 'active',
           must_change_pw: true, wallet_balance: 0, avatar_path: '', created_by: s.account_id, created_at: new Date().toISOString()
         };
         return TTV.Store.put('vendors', Object.assign(record, cred));
@@ -702,6 +702,191 @@ window.TTV = window.TTV || {};
             .then(function () { return { vendor: publicVendor(saved), changed: changed }; });
         });
       });
+    });
+  };
+  /* ===================== 3.6 Cấu hình giá và hệ thống (admin) ===================== */
+  var CFG_DEFAULTS = { commission_default: 15, demo_quote_bot_enabled: true, vendor_wallet_negative_limit: -500000, hotline: '', support_email: '', zalo_url: '', quick_topup_amounts: [50000, 100000, 200000, 500000, 1000000, 2000000], topup_fee: 0 };
+  var CFG_KEYS = Object.keys(CFG_DEFAULTS);
+  function fmtVnd(n) { return new Intl.NumberFormat('vi-VN').format(n); }
+  // Số tiền nguyên: nhận "100000", "100.000", "100,000", "100 000", "100.000đ". Trả số nguyên hoặc null.
+  api.parseMoneyInput = function (raw) {
+    var x = String(raw == null ? '' : raw).trim().replace(/đ$/i, '').trim();
+    if (!x || !/^[\d.,\s]+$/.test(x)) return null;
+    var digits = x.replace(/[.,\s]/g, '');
+    return /^\d{1,12}$/.test(digits) ? Number(digits) : null;
+  };
+  // Số thập phân tối đa 2 chữ số, dấu phẩy hoặc dấu chấm: "1,25" / "1.25" / "70". Trả số hoặc null.
+  function parseDecimalInput(raw) {
+    var x = String(raw == null ? '' : raw).trim().replace(',', '.');
+    return /^\d{1,6}(\.\d{1,2})?$/.test(x) ? Number(x) : null;
+  }
+  function cfgMoney(data, key, min, max, errors) {
+    var raw = data[key], n = api.parseMoneyInput(raw);
+    if (String(raw == null ? '' : raw).trim() === '') { errors[key] = 'Vui lòng nhập số tiền.'; return null; }
+    if (n == null) { errors[key] = 'Chỉ nhập số (ví dụ 100.000).'; return null; }
+    if (n < min || n > max) { errors[key] = 'Nhập từ ' + fmtVnd(min) + 'đ đến ' + fmtVnd(max) + 'đ.'; return null; }
+    return n;
+  }
+  function cfgDecimal(data, key, min, max, unit, errors) {
+    var raw = data[key];
+    if (String(raw == null ? '' : raw).trim() === '') { errors[key] = 'Vui lòng nhập giá trị.'; return null; }
+    var n = parseDecimalInput(raw);
+    if (n == null) { errors[key] = 'Chỉ nhập số, tối đa 2 chữ số thập phân.'; return null; }
+    if (n < min || n > max) { errors[key] = 'Nhập từ ' + String(min).replace('.', ',') + ' đến ' + String(max).replace('.', ',') + unit + '.'; return null; }
+    return n;
+  }
+  function cfgInt(data, key, min, max, unit, errors) {
+    var raw = String(data[key] == null ? '' : data[key]).trim();
+    if (!raw) { errors[key] = 'Vui lòng nhập giá trị.'; return null; }
+    if (!/^\d{1,6}$/.test(raw)) { errors[key] = 'Chỉ nhập số nguyên.'; return null; }
+    var n = Number(raw);
+    if (n < min || n > max) { errors[key] = 'Nhập từ ' + min + ' đến ' + max + unit + '.'; return null; }
+    return n;
+  }
+
+  // Kiểm tra dữ liệu form (chuỗi người dùng nhập). Trả { errors:{khóa:thông báo}, value:{services,tiers,pricing,settings} }.
+  // Khóa lỗi: svc_<mã dịch vụ>, tier_<mã mức>, floor_fee, elevator_pct, km_fee, speed_fast, speed_urgent, min_amount, quote_window_min,
+  //           commission_default, wallet_negative_limit, hotline, support_email, zalo_url, topup_amounts, topup_fee.
+  api.validateAdminConfig = function (data) {
+    data = data || {};
+    var errors = {}, value = { services: {}, tiers: {}, pricing: {}, settings: {} }, n;
+    Object.keys(data.svc || {}).forEach(function (code) {
+      var e = {}; n = cfgMoney({ v: data.svc[code] }, 'v', 0, 10000000, e);
+      if (e.v) errors['svc_' + code] = e.v; else value.services[code] = n;
+    });
+    Object.keys(data.tier || {}).forEach(function (code) {
+      var e = {}; n = cfgMoney({ v: data.tier[code] }, 'v', 0, 10000000, e);
+      if (e.v) errors['tier_' + code] = e.v; else value.tiers[code] = n;
+    });
+    var p = value.pricing;
+    if ((n = cfgMoney(data, 'floor_fee', 0, 1000000, errors)) != null) p.floor_fee = n;
+    if ((n = cfgDecimal(data, 'elevator_pct', 0, 100, ' %', errors)) != null) p.elevator_discount = Math.round(n * 100) / 10000; // 70 % → 0.7
+    if ((n = cfgMoney(data, 'km_fee', 0, 1000000, errors)) != null) p.km_fee = n;
+    var fast = cfgDecimal(data, 'speed_fast', 1, 10, '', errors), urgent = cfgDecimal(data, 'speed_urgent', 1, 10, '', errors);
+    if (fast != null && urgent != null && urgent < fast) errors.speed_urgent = 'Hệ số Gấp phải lớn hơn hoặc bằng Nhanh.';
+    if (fast != null && urgent != null && !errors.speed_urgent) p.speed_multipliers = { default: 1, fast: fast, urgent: urgent };
+    if ((n = cfgMoney(data, 'min_amount', 1000, 10000000, errors)) != null) p.min_amount = n;
+    if ((n = cfgInt(data, 'quote_window_min', 1, 1440, ' phút', errors)) != null) p.quote_window_min = n;
+
+    var st = value.settings;
+    if ((n = cfgDecimal(data, 'commission_default', 0, 100, ' %', errors)) != null) st.commission_default = n;
+    st.demo_quote_bot_enabled = !!data.bot_enabled;
+    if ((n = cfgMoney(data, 'wallet_negative_limit', 0, 100000000, errors)) != null) st.vendor_wallet_negative_limit = n === 0 ? 0 : -n; // nhập số dương, lưu số âm
+    var hot = String(data.hotline == null ? '' : data.hotline).trim().replace(/\s+/g, ' '), hd = hot.replace(/\D/g, '');
+    if (!hot) errors.hotline = 'Vui lòng nhập hotline.';
+    else if (hot.length > 20 || !/^[0-9 .+\-()]+$/.test(hot) || hd.length < 8 || hd.length > 15) errors.hotline = 'Hotline gồm 8–15 chữ số (ví dụ 1900 0000).';
+    else st.hotline = hot;
+    var mail = String(data.support_email == null ? '' : data.support_email).trim();
+    if (!mail) errors.support_email = 'Vui lòng nhập email hỗ trợ.';
+    else if (mail.length > 120 || !api.isValidEmail(mail)) errors.support_email = 'Email không hợp lệ.';
+    else st.support_email = mail;
+    var zalo = String(data.zalo_url == null ? '' : data.zalo_url).trim(), zurl = null;
+    if (!zalo) errors.zalo_url = 'Vui lòng nhập link Zalo.';
+    else {
+      try { zurl = new URL(zalo); } catch (_) { zurl = null; }
+      if (zalo.length > 200 || !zurl || zurl.protocol !== 'https:' || zurl.hostname.indexOf('.') < 0) errors.zalo_url = 'Link phải bắt đầu bằng https:// (ví dụ https://zalo.me).';
+      else st.zalo_url = zalo;
+    }
+    var amounts = (Array.isArray(data.topup_amounts) ? data.topup_amounts : []).map(function (a) { return typeof a === 'number' ? a : api.parseMoneyInput(a); });
+    if (!amounts.length) errors.topup_amounts = 'Cần ít nhất 1 mức nạp nhanh.';
+    else if (amounts.length > 9) errors.topup_amounts = 'Tối đa 9 mức nạp nhanh.';
+    else if (amounts.some(function (a) { return a == null || a < 10000 || a > 50000000; })) errors.topup_amounts = 'Mỗi mức từ 10.000đ đến 50.000.000đ.';
+    else if (amounts.some(function (a, i) { return amounts.indexOf(a) !== i; })) errors.topup_amounts = 'Các mức nạp nhanh không được trùng nhau.';
+    else st.quick_topup_amounts = amounts.slice().sort(function (a, b) { return a - b; });
+    if ((n = cfgMoney(data, 'topup_fee', 0, 1000000, errors)) != null) st.topup_fee = n;
+    return { errors: errors, value: value };
+  };
+
+  // Đọc toàn bộ cấu hình để hiển thị: { services:[{code,name,icon,base_price}], tiers:[{code,name,description,price}], pricing:{…}, settings:{…} }.
+  api.getAdminConfig = function () {
+    var err = adminGuard('Bạn không có quyền xem cấu hình hệ thống.');
+    if (err) return Promise.reject(err);
+    return Promise.all([TTV.Store.list('services'), TTV.Store.get('pricing_config', 'default'), TTV.Store.list('app_settings')]).then(function (r) {
+      var row = r[1];
+      if (!row) throw fail('NOT_FOUND', 'Chưa có cấu hình giá. Hãy xóa dữ liệu trình duyệt và tải lại để nạp dữ liệu mẫu.');
+      var order = ['moving', 'warehouse', 'furniture', 'office', 'construction', 'hourly', 'goods'];
+      var services = (r[0] || []).map(function (x) { return { code: x.code || x.id, name: x.name, icon: x.icon || '', base_price: Number(x.base_price) || 0 }; })
+        .sort(function (a, b) { var ia = order.indexOf(a.code), ib = order.indexOf(b.code); return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib); });
+      var tiers = (row.weight_tiers || []).map(function (x) { return { code: x.code || x.id, name: x.name, description: x.description || '', price: Number(x.price) || 0 }; });
+      var sm = row.speed_multipliers || {};
+      var pricing = { floor_fee: Number(row.floor_fee) || 0, elevator_discount: row.elevator_discount == null ? 0.7 : Number(row.elevator_discount), km_fee: Number(row.km_fee) || 0,
+        speed_multipliers: { default: 1, fast: Number(sm.fast) || 1.25, urgent: Number(sm.urgent) || 1.5 }, min_amount: Number(row.min_amount) || 10000, quote_window_min: Number(row.quote_window_min) || 30 };
+      var settings = {};
+      CFG_KEYS.forEach(function (k) {
+        var hit = (r[2] || []).filter(function (x) { return (x.key || x.id) === k; })[0];
+        settings[k] = hit && hit.value != null ? hit.value : CFG_DEFAULTS[k];
+      });
+      return { services: services, tiers: tiers, pricing: pricing, settings: settings };
+    });
+  };
+
+  // Lưu cấu hình. Chỉ ghi các bản ghi thật sự đổi; đọc lại ngay trước khi ghi; ghi audit_logs theo nhóm. Trả { changed:[nhóm], config }.
+  api.saveAdminConfig = function (data) {
+    var err = adminGuard('Bạn không có quyền sửa cấu hình hệ thống.');
+    if (err) return Promise.reject(err);
+    var res = api.validateAdminConfig(data);
+    return Promise.all([TTV.Store.list('services'), TTV.Store.get('pricing_config', 'default'), TTV.Store.list('app_settings')]).then(function (r) {
+      var services = r[0] || [], row = r[1], settingRows = r[2] || [];
+      if (!row) throw fail('NOT_FOUND', 'Chưa có cấu hình giá. Hãy xóa dữ liệu trình duyệt và tải lại để nạp dữ liệu mẫu.');
+      var codes = services.map(function (x) { return x.code || x.id; }), tierCodes = (row.weight_tiers || []).map(function (x) { return x.code || x.id; });
+      Object.keys((data && data.svc) || {}).forEach(function (c) { if (codes.indexOf(c) < 0) res.errors['svc_' + c] = 'Dịch vụ không tồn tại.'; });
+      Object.keys((data && data.tier) || {}).forEach(function (c) { if (tierCodes.indexOf(c) < 0) res.errors['tier_' + c] = 'Mức trọng lượng không tồn tại.'; });
+      if (Object.keys(res.errors).length) throw fail('VALIDATION', 'Vui lòng kiểm tra lại các trường được đánh dấu.', { errors: res.errors });
+      var v = res.value, now = new Date().toISOString(), changed = [], writes = [];
+
+      // 1) Giá cơ bản dịch vụ
+      var svcChanges = {};
+      services.forEach(function (x) {
+        var code = x.code || x.id;
+        if (v.services[code] != null && Number(x.base_price) !== v.services[code]) {
+          svcChanges[code] = { from: Number(x.base_price) || 0, to: v.services[code] };
+          writes.push(function () { return TTV.Store.put('services', Object.assign({}, x, { base_price: v.services[code] })); });
+        }
+      });
+      if (Object.keys(svcChanges).length) changed.push('services');
+
+      // 2) pricing_config
+      var pc = {}, nextRow = Object.assign({}, row), tierChanges = {};
+      nextRow.weight_tiers = (row.weight_tiers || []).map(function (x) {
+        var code = x.code || x.id;
+        if (v.tiers[code] != null && Number(x.price) !== v.tiers[code]) { tierChanges[code] = { from: Number(x.price) || 0, to: v.tiers[code] }; return Object.assign({}, x, { price: v.tiers[code] }); }
+        return x;
+      });
+      if (Object.keys(tierChanges).length) pc.weight_tiers = tierChanges;
+      ['floor_fee', 'elevator_discount', 'km_fee', 'min_amount', 'quote_window_min'].forEach(function (k) {
+        if (Number(row[k]) !== v.pricing[k]) { pc[k] = { from: row[k] == null ? null : row[k], to: v.pricing[k] }; nextRow[k] = v.pricing[k]; }
+      });
+      var oldSm = row.speed_multipliers || {}, newSm = v.pricing.speed_multipliers;
+      ['fast', 'urgent'].forEach(function (k) { if (Number(oldSm[k]) !== newSm[k]) pc['speed_' + k] = { from: oldSm[k] == null ? null : oldSm[k], to: newSm[k] }; });
+      if (Number(oldSm.default) !== 1 || pc.speed_fast || pc.speed_urgent) nextRow.speed_multipliers = newSm;
+      if (Object.keys(pc).length) {
+        nextRow.updated_at = now;
+        writes.push(function () { return TTV.Store.put('pricing_config', nextRow); });
+        changed.push('pricing');
+      }
+
+      // 3) app_settings
+      var stChanges = {};
+      CFG_KEYS.forEach(function (k) {
+        var hit = settingRows.filter(function (x) { return (x.key || x.id) === k; })[0];
+        var cur = hit && hit.value != null ? hit.value : CFG_DEFAULTS[k], next = v.settings[k];
+        if (JSON.stringify(cur) !== JSON.stringify(next)) {
+          stChanges[k] = { from: cur, to: next };
+          writes.push(function () { return TTV.Store.put('app_settings', Object.assign({}, hit || {}, { id: k, key: k, value: next, updated_at: now })); });
+        }
+      });
+      if (Object.keys(stChanges).length) changed.push('app');
+
+      if (!changed.length) return { changed: [] };
+      return writes.reduce(function (chain, w) { return chain.then(w); }, Promise.resolve()).then(function () {
+        var logs = [];
+        if (svcChanges && Object.keys(svcChanges).length) logs.push(auditSafe('settings.service_price.update', { target_table: 'services', target_id: 'base_price', detail: { changes: svcChanges } }));
+        if (Object.keys(pc).length) logs.push(auditSafe('settings.pricing.update', { target_table: 'pricing_config', target_id: 'default', detail: { changes: pc } }));
+        if (Object.keys(stChanges).length) logs.push(auditSafe('settings.app.update', { target_table: 'app_settings', target_id: Object.keys(stChanges).join(','), detail: { changes: stChanges } }));
+        return Promise.all(logs);
+      }).then(function () { return { changed: changed }; });
+    }).then(function (res2) {
+      return api.getAdminConfig().then(function (config) { return { changed: res2.changed, config: config }; });
     });
   };
 })(window.TTV);

@@ -591,3 +591,17 @@ a { color: var(--c-primary-600); }
 .admin-modal-actions .btn { flex:1; }
 .modal__footer { padding:0 16px 16px; }
 .modal__body .admin-cred { margin-bottom:12px; }
+
+/* ===== 3.6 Giá & cấu hình (admin) ===== */
+.admin-card-desc { margin:-4px 0 12px; color:var(--c-text-muted); font-size:var(--fs-sm); line-height:1.45; }
+.admin-form-actions--split { display:flex; gap:8px; }
+.admin-form-actions--split .btn { min-width:0; }
+.admin-form-actions--split .btn-primary { flex:1 1 60%; }
+.admin-form-actions--split .btn-secondary { flex:1 1 32%; }
+.admin-amount-chips { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:10px; }
+.admin-amount-chip { display:inline-flex; align-items:center; gap:6px; padding:6px 6px 6px 12px; border:1px solid var(--c-primary-600); border-radius:999px; background:var(--c-primary-50); color:var(--c-primary-600); font-size:var(--fs-sm); font-weight:600; }
+.admin-amount-chip button { display:grid; place-items:center; width:22px; height:22px; padding:0; border:0; border-radius:50%; background:#1b7be41f; color:inherit; font-size:15px; line-height:1; cursor:pointer; }
+.admin-inline-add { display:flex; align-items:stretch; gap:8px; }
+.admin-inline-add input { flex:1; min-width:0; }
+.admin-inline-add .admin-mini-btn { flex:0 0 auto; min-width:84px; }
+.admin-form .toggle { margin-bottom:6px; }
