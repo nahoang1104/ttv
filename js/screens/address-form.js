@@ -166,6 +166,18 @@ TTV.screens = TTV.screens || {};
         saving: false
       };
       paint();
+      if (TTV.api.getCurrentUser) {
+        TTV.api.getCurrentUser().then(function (user) {
+          if (!user || !state) return;
+          if (!state.contact_name && user.name) state.contact_name = user.name;
+          if (!state.contact_phone && user.phone) state.contact_phone = user.phone;
+          var nameEl = rootEl && rootEl.querySelector('[data-field="contact_name"]');
+          var phoneEl = rootEl && rootEl.querySelector('[data-field="contact_phone"]');
+          if (nameEl && !nameEl.value) nameEl.value = state.contact_name;
+          if (phoneEl && !phoneEl.value) phoneEl.value = state.contact_phone;
+          syncSave();
+        }).catch(function () {});
+      }
     },
     destroy: function () {
       if (TTV.ui.placePicker) TTV.ui.placePicker.close();

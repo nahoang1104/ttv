@@ -40,7 +40,16 @@ window.TTV = window.TTV || {};
   document.addEventListener('click', function (e) {
     var route = e.target.closest('[data-route]'); if (route) { e.preventDefault(); TTV.Router.navigate(route.getAttribute('data-route')); return; }
     var back = e.target.closest('[data-back]'); if (back) { e.preventDefault(); if (history.length > 1) history.back(); else TTV.Router.navigate('/'); return; }
-    var close = e.target.closest('[data-modal-close], [data-sheet-close]'); if (close) { if (close.matches('[data-modal-close]') && close.classList.contains('modal-backdrop') || close.matches('[data-sheet-close]') && close.classList.contains('sheet-backdrop') || close.matches('button')) { var overlay = close.closest('.modal-backdrop, .sheet-backdrop') || close; overlay.remove(); } return; }
+    var closeBtn = e.target.closest('button[data-modal-close], button[data-sheet-close]');
+    if (closeBtn) {
+      var overlay = closeBtn.closest('.modal-backdrop, .sheet-backdrop');
+      if (overlay) overlay.remove();
+      return;
+    }
+    if (e.target.classList.contains('sheet-backdrop') || e.target.classList.contains('modal-backdrop')) {
+      e.target.remove();
+      return;
+    }
     var step = e.target.closest('[data-step]'); if (step) { var wrap = step.closest('.stepper'), out = wrap.querySelector('output'), next = Math.max(+wrap.dataset.min, Math.min(+wrap.dataset.max, (+out.value || +out.textContent || 0) + (+step.dataset.step))); out.textContent = next; out.value = next; }
     var tab = e.target.closest('[data-tab]'); if (tab) { tab.parentElement.querySelectorAll('[data-tab]').forEach(function (t) { t.classList.toggle('is-active', t === tab); t.setAttribute('aria-selected', t === tab ? 'true' : 'false'); }); }
   });

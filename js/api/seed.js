@@ -2,7 +2,7 @@
 window.TTV = window.TTV || {};
 (function (TTV) {
   'use strict';
-  var SEED_VERSION = '2026-10-v2';
+  var SEED_VERSION = '2026-10-v4';
   var services = [
     {id:'moving',code:'moving',name:'Chuyển nhà',desc:'Chuyển nhà trọn gói, có thợ + xe',icon:'🏠',base_price:50000,unit:'lượt'},
     {id:'warehouse',code:'warehouse',name:'Bốc xếp kho',desc:'Bốc/dỡ hàng kho, tính theo khối',icon:'📦',base_price:100000,unit:'khối'},
@@ -13,11 +13,11 @@ window.TTV = window.TTV || {};
     {id:'goods',code:'goods',name:'Bốc vác hàng hóa',desc:'Bốc/dỡ, vận chuyển hàng hóa lẻ',icon:'🚚',base_price:100000,unit:'lượt'}
   ];
   var pricing = [{id:'default',weight_tiers:[
-    {id:'light',code:'light',name:'Nhẹ',description:'Dưới 30 kg — vài thùng, đồ lặt vặt',price:100000},
-    {id:'medium',code:'medium',name:'Vừa',description:'30–100 kg — đồ 1 phòng, vài món nội thất',price:100000},
-    {id:'heavy',code:'heavy',name:'Nặng',description:'100–300 kg — đồ cả căn hộ',price:100000},
-    {id:'very_heavy',code:'very_heavy',name:'Rất nặng',description:'Trên 300 kg — nhà nguyên căn, kho hàng',price:100000}
-  ],floor_fee:15000,elevator_discount:0.7,km_fee:5000,speed_multipliers:{default:1,fast:1.25,urgent:1.5},min_amount:10000,quote_window_min:30}];
+    {id:'light',code:'light',name:'Nhẹ',description:'Dưới 30 kg — vài thùng, đồ lặt vặt',price:15000},
+    {id:'medium',code:'medium',name:'Vừa',description:'30–100 kg — đồ 1 phòng, vài món nội thất',price:57000},
+    {id:'heavy',code:'heavy',name:'Nặng',description:'100–300 kg — đồ cả căn hộ',price:160000},
+    {id:'very_heavy',code:'very_heavy',name:'Rất nặng',description:'Trên 300 kg — nhà nguyên căn, kho hàng',price:330000}
+  ],floor_fee:15000,elevator_discount:0.7,km_fee:10000,extra_worker_fee:107000,speed_multipliers:{default:1,fast:1.25,urgent:1.5},min_amount:10000,quote_window_min:30}];
   var vendors = [
     {id:'vendor-demo-team',name:'Tổ bốc xếp Thành Công',type:'team',username:'thanhcong',phone:'0900000001',rating:4.8,jobs_done:128,team_size:5,services:['moving','warehouse','furniture','office','construction','hourly','goods'],areas:['Ho Chi Minh City'],vehicle:'Xe tải',commission_rate:15,is_online:true,status:'active',kyc_status:'approved',wallet_balance:500000,avatar_path:'',created_by:'seed'},
     {id:'vendor-demo-company',name:'Công ty Vận chuyển An Phát',type:'company',username:'anphat',phone:'0900000002',rating:4.7,jobs_done:96,team_size:10,services:['moving','warehouse','office','goods'],areas:['Ho Chi Minh City'],vehicle:'Xe tải 1.5 tấn',commission_rate:15,is_online:true,status:'active',kyc_status:'approved',wallet_balance:800000,avatar_path:'',created_by:'seed'},
@@ -72,7 +72,7 @@ window.TTV = window.TTV || {};
         if (meta && meta.value && meta.value !== SEED_VERSION && !options.force) {
           return store.get('banners', 'banner-welcome').then(function (row) {
             var next = (!row || row.title === 'Chào mừng đến TingTingVac') ? store.put('banners', banners[0]) : Promise.resolve();
-            return next.then(function () {
+            return next.then(function () { return store.put('pricing_config', pricing[0]); }).then(function () {
               return store.put('__meta', {id:'seed_version',value:SEED_VERSION,seeded_at:new Date().toISOString(),migrated_from:meta.value}).then(function () {
                 return {seeded:false,reason:'migrated',version:SEED_VERSION,from:meta.value};
               });
