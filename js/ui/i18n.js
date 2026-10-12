@@ -3,7 +3,31 @@ window.TTV = window.TTV || {};
 (function (TTV) {
   'use strict';
   var dictionaries = {
-    vi: {},
+    vi: {
+      'common.loading': 'Đang tải…',
+      'common.save': 'Lưu',
+      'common.cancel': 'Hủy',
+      'common.error': 'Đã xảy ra lỗi',
+      'common.comingSoon': 'Sắp có',
+      'home.greet.morning': 'Buổi sáng vui vẻ!',
+      'home.greet.noon': 'Buổi trưa vui vẻ!',
+      'home.greet.afternoon': 'Buổi chiều vui vẻ!',
+      'home.greet.evening': 'Buổi tối vui vẻ!',
+      'home.notifications': 'Thông báo',
+      'home.pickup.label': 'Điểm bốc hàng…',
+      'home.pickup.placeholder': 'Chọn điểm bốc hàng của bạn',
+      'home.dropoff.label': 'Bốc vác đến?',
+      'home.paste': 'Dán',
+      'home.paste.denied': 'Không đọc được clipboard. Hãy dán thủ công trên form đặt đơn.',
+      'home.services': 'Dịch vụ',
+      'home.explore': 'Khám phá thêm',
+      'home.banner.cta': 'Tham gia ngay',
+      'home.banner.member': 'Ưu đãi Hội viên',
+      'home.banner.memberSub': 'Tiết kiệm đến 20% mọi đơn bốc vác',
+      'home.banner.promo': 'Ưu đãi khách mới',
+      'home.explore.card1': 'Bốc vác công kênh chuyên nghiệp',
+      'home.explore.card2': 'Khai giá hàng hóa là gì?'
+    },
     en: { 'common.loading': 'Loading…', 'common.save': 'Save', 'common.cancel': 'Cancel', 'common.error': 'An error occurred' }
   };
   var locale = 'vi';
@@ -73,8 +97,8 @@ window.TTV = window.TTV || {};
   }
   TTV.I18n = { t: t, setLocale: setLocale, getLocale: function () { return locale; }, dictionaries: dictionaries };
   TTV.Utils = {
-    money: money, formatMoney: money, date: date, formatDate: date, relativeTime: relativeTime,
-    maskPhone: maskPhone, id: id, generateId: id, orderCode: orderCode, generateOrderCode: orderCode, audit: audit
+    money: money, date: date, relativeTime: relativeTime,
+    maskPhone: maskPhone, id: id, orderCode: orderCode, audit: audit
   };
   TTV.audit = audit;
 })(window.TTV);

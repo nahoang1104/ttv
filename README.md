@@ -28,7 +28,3 @@ Không mở trực tiếp bằng `file://` (upload và IndexedDB cần http).
 Không có server nên kiểm quyền chỉ là rào cản phía trình duyệt, ai mở DevTools đều vượt được. Chỉ phù hợp bản demo. File upload ghi vào `uploads/` trong source (Chrome/Edge qua `http://localhost` hoặc https), DB chỉ lưu `path`.
 
 Kế hoạch triển khai và quy ước: xem `CLAUDE.md`. Ảnh thiết kế tham chiếu: `docs/reference/`.
-
-## Kiểm tra task 1.7–1.8
-
-Mở `http://localhost:3000/#/sim/upload` bằng Chrome/Edge. Chọn thư mục gốc có quyền ghi; ứng dụng tạo `uploads/` bên trong rồi lưu ảnh theo `uploads/{ownerId}/{loại}/{tên-ngẫu-nhiên}.{ext}`. Ảnh được nén trước khi ghi. Video có thể kiểm tra thời lượng tối đa 120 giây. Trang demo cũng kiểm tra định dạng tiền/ngày, thời gian tương đối, che số điện thoại, mã đơn và ghi audit log. File System Access API yêu cầu localhost hoặc HTTPS; dữ liệu audit và các đường dẫn có thể lưu trong DB nhưng việc ghi file thực tế phụ thuộc quyền trình duyệt.

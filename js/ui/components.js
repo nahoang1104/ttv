@@ -6,7 +6,19 @@ window.TTV = window.TTV || {};
   var C = {
     escape: esc,
     header: function (title, opts) { opts = opts || {}; return '<header class="app-header ' + (opts.large ? 'app-header--large' : '') + '">' + (opts.back === false ? '' : '<button class="app-header__back" data-back aria-label="Quay lại">‹</button>') + '<h1>' + esc(title) + '</h1>' + (opts.action ? '<button class="app-header__action" data-action="' + esc(opts.action) + '">' + esc(opts.actionLabel || '…') + '</button>' : '') + '</header>'; },
-    bottomTab: function (active, items) { items = items || [{id:'home',label:'Trang chủ',icon:'⌂',route:'/home'},{id:'wallet',label:'Ví',icon:'▣',route:'/wallet'},{id:'history',label:'Lịch sử',icon:'◷',route:'/orders'},{id:'profile',label:'Cá nhân',icon:'♙',route:'/profile'}]; return '<nav class="bottom-tabs" aria-label="Điều hướng chính">' + items.map(function (it) { return '<button class="bottom-tabs__item ' + (it.id === active ? 'is-active' : '') + '" data-route="' + esc(it.route) + '"' + (it.id === active ? ' aria-current="page"' : '') + '><span class="bottom-tabs__icon">' + esc(it.icon) + '</span><span>' + esc(it.label) + '</span></button>'; }).join('') + '</nav>'; },
+    bottomTab: function (active, items) {
+      var icons = {
+        home: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 3.2 3.8 10v10.2h5.4v-6.1h5.6v6.1h5.4V10z"/></svg>',
+        wallet: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" d="M4.5 8.2h15v10.3H4.5z"/><path fill="none" stroke="currentColor" stroke-width="1.8" d="M4.8 8.2 14.2 4.6 19.2 8.2"/><circle cx="16.2" cy="13.4" r="1.1" fill="currentColor"/></svg>',
+        history: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="4.5" width="12" height="15" rx="1.6" fill="none" stroke="currentColor" stroke-width="1.8"/><path fill="none" stroke="currentColor" stroke-width="1.8" d="M9 2.8h6M12 9.2v4.2l2.4 1.4"/></svg>',
+        profile: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8.2" r="3.1" fill="none" stroke="currentColor" stroke-width="1.8"/><path fill="none" stroke="currentColor" stroke-width="1.8" d="M5.6 19.2c.7-3.2 3.2-4.8 6.4-4.8s5.7 1.6 6.4 4.8"/></svg>'
+      };
+      items = items || [{id:'home',label:'Trang chủ',route:'/home'},{id:'wallet',label:'Ví',route:'/wallet'},{id:'history',label:'Lịch sử',route:'/orders'},{id:'profile',label:'Cá nhân',route:'/profile'}];
+      return '<nav class="bottom-tabs" aria-label="Điều hướng chính">' + items.map(function (it) {
+        var icon = it.iconHtml || icons[it.id] || esc(it.icon || '');
+        return '<button class="bottom-tabs__item ' + (it.id === active ? 'is-active' : '') + '" data-route="' + esc(it.route) + '"' + (it.id === active ? ' aria-current="page"' : '') + '><span class="bottom-tabs__icon">' + icon + '</span><span>' + esc(it.label) + '</span></button>';
+      }).join('') + '</nav>';
+    },
     toast: function (message, type) { var el = document.getElementById('toast'); if (!el) return; el.innerHTML = '<div class="toast toast--' + esc(type || 'info') + '">' + esc(message) + '</div>'; clearTimeout(C._toastTimer); C._toastTimer = setTimeout(function(){el.innerHTML='';}, 2800); },
     modal: function (title, body, opts) { opts = opts || {}; return '<div class="modal-backdrop" data-modal-close><section class="modal" role="dialog" aria-modal="true" aria-label="' + esc(title) + '"><header class="modal__header"><h2>' + esc(title) + '</h2><button class="icon-btn" data-modal-close aria-label="Đóng">×</button></header><div class="modal__body">' + body + '</div>' + (opts.footer ? '<footer class="modal__footer">' + opts.footer + '</footer>' : '') + '</section></div>'; },
     sheet: function (title, body, opts) { opts = opts || {}; return '<div class="sheet-backdrop" data-sheet-close><section class="bottom-sheet" role="dialog" aria-modal="true" aria-label="' + esc(title) + '"><div class="bottom-sheet__handle"></div><header class="bottom-sheet__header"><h2>' + esc(title) + '</h2><button class="icon-btn" data-sheet-close aria-label="Đóng">×</button></header><div class="bottom-sheet__body">' + body + '</div>' + (opts.footer ? '<footer class="bottom-sheet__footer">' + opts.footer + '</footer>' : '') + '</section></div>'; },
@@ -30,5 +42,6 @@ window.TTV = window.TTV || {};
     var back = e.target.closest('[data-back]'); if (back) { e.preventDefault(); if (history.length > 1) history.back(); else TTV.Router.navigate('/'); return; }
     var close = e.target.closest('[data-modal-close], [data-sheet-close]'); if (close) { if (close.matches('[data-modal-close]') && close.classList.contains('modal-backdrop') || close.matches('[data-sheet-close]') && close.classList.contains('sheet-backdrop') || close.matches('button')) { var overlay = close.closest('.modal-backdrop, .sheet-backdrop') || close; overlay.remove(); } return; }
     var step = e.target.closest('[data-step]'); if (step) { var wrap = step.closest('.stepper'), out = wrap.querySelector('output'), next = Math.max(+wrap.dataset.min, Math.min(+wrap.dataset.max, (+out.value || +out.textContent || 0) + (+step.dataset.step))); out.textContent = next; out.value = next; }
+    var tab = e.target.closest('[data-tab]'); if (tab) { tab.parentElement.querySelectorAll('[data-tab]').forEach(function (t) { t.classList.toggle('is-active', t === tab); t.setAttribute('aria-selected', t === tab ? 'true' : 'false'); }); }
   });
 })(window.TTV);

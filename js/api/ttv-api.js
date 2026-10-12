@@ -1,4 +1,4 @@
-/* ttv-api.js — nghiệp vụ (tính giá, trạng thái đơn, quyền). Màn hình chỉ gọi qua TTV.api, không gọi store trực tiếp. */
+/* ttv-api.js — nghiệp vụ. Màn hình chỉ gọi qua TTV.api, không gọi store trực tiếp. */
 window.TTV = window.TTV || {};
 (function (TTV) {
   'use strict';
@@ -18,7 +18,6 @@ window.TTV = window.TTV || {};
     return e;
   }
 
-  // Chuẩn hóa SĐT Việt Nam. Trả về {ok, e164:'+84912345678', local:'0912345678', error}.
   function normalizePhone(input) {
     var raw = String(input == null ? '' : input).replace(/[\s.\-()]/g, '');
     var national;
@@ -42,13 +41,12 @@ window.TTV = window.TTV || {};
   function readChallenge() { try { return JSON.parse(sessionStorage.getItem(CHALLENGE_KEY) || 'null'); } catch (_) { return null; } }
   function writeChallenge(c) { try { if (c) sessionStorage.setItem(CHALLENGE_KEY, JSON.stringify(c)); else sessionStorage.removeItem(CHALLENGE_KEY); } catch (_) {} }
 
-  // Số lần thử và thời điểm khóa lưu theo SĐT trong DB (qua F5 hoặc mở tab mới vẫn khóa).
   function attemptKey(e164) { return 'otp_attempts:' + e164; }
   function readAttempts(e164) {
     return TTV.Store.get('__meta', attemptKey(e164)).then(function (row) {
       var now = Date.now();
       if (!row) return { id: attemptKey(e164), attempts_left: OTP_MAX_ATTEMPTS, locked_until: 0 };
-      if (row.locked_until && row.locked_until <= now) return { id: row.id, attempts_left: OTP_MAX_ATTEMPTS, locked_until: 0 }; // hết khóa
+      if (row.locked_until && row.locked_until <= now) return { id: row.id, attempts_left: OTP_MAX_ATTEMPTS, locked_until: 0 };
       return row;
     });
   }
@@ -66,7 +64,6 @@ window.TTV = window.TTV || {};
     return c;
   }
 
-  // Bước 1: nhập SĐT → gửi OTP. Trả {phone, local, masked, code} (code chỉ để hiện toast demo).
   api.requestOtp = function (phoneInput) {
     var phone = normalizePhone(phoneInput);
     if (!phone.ok) return Promise.reject(fail('INVALID_PHONE', phone.error));
@@ -77,7 +74,6 @@ window.TTV = window.TTV || {};
     });
   };
 
-  // Gửi lại mã (chỉ khi hết đếm ngược). Không reset số lần thử, tránh lách giới hạn.
   api.resendOtp = function () {
     var c = readChallenge();
     if (!c) return Promise.reject(fail('NO_CHALLENGE', 'Phiên xác thực đã hết, hãy nhập lại số điện thoại.'));
@@ -89,7 +85,6 @@ window.TTV = window.TTV || {};
     });
   };
 
-  // Trạng thái màn OTP (để vẽ lại sau F5). null nếu chưa có thử thách.
   api.getOtpState = function () {
     var c = readChallenge();
     if (!c) return Promise.resolve(null);
@@ -112,7 +107,6 @@ window.TTV = window.TTV || {};
       lang: 'vi', theme: 'light', created_at: new Date().toISOString()
     }, fields || {});
   }
-  // Khách mới (chưa có tên) phải qua onboarding.
   api.needsOnboarding = function (user) { return !user || !String(user.name || '').trim(); };
 
   function startCustomerSession(user, isNew) {
@@ -121,7 +115,6 @@ window.TTV = window.TTV || {};
     });
   }
 
-  // Bước 2: nhập OTP. Sai 5 lần → khóa tạm. Đúng → tìm/tạo khách, tạo session.
   api.verifyOtp = function (code) {
     var c = readChallenge();
     if (!c) return Promise.reject(fail('NO_CHALLENGE', 'Phiên xác thực đã hết, hãy nhập lại số điện thoại.'));
@@ -138,7 +131,6 @@ window.TTV = window.TTV || {};
           throw fail('WRONG_CODE', 'Mã OTP không đúng.', { attempts_left: state.attempts_left });
         });
       }
-      // Đúng mã: xóa bộ đếm, tìm hoặc tạo khách.
       return TTV.Store.remove('__meta', attemptKey(c.phone)).then(function () {
         return TTV.Store.query('users', { phone: c.phone });
       }).then(function (rows) {
@@ -151,7 +143,6 @@ window.TTV = window.TTV || {};
     });
   };
 
-  // Zalo / Google (demo): mỗi phương thức một tài khoản demo cố định, tạo lần đầu.
   api.loginDemo = function (method) {
     if (method !== 'zalo' && method !== 'google') return Promise.reject(fail('INVALID_METHOD', 'Phương thức đăng nhập không hợp lệ.'));
     var id = 'demo-' + method;
@@ -172,12 +163,10 @@ window.TTV = window.TTV || {};
   api.logout = function () { writeChallenge(null); return TTV.auth.destroySession(); };
   api.normalizePhone = normalizePhone;
   api.OTP = { MAX_ATTEMPTS: OTP_MAX_ATTEMPTS, LOCK_MS: OTP_LOCK_MS, RESEND_MS: OTP_RESEND_MS };
-  /* ===== 2.3 Onboarding khách ===== */
+
   var EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
   api.isValidEmail = function (email) { return EMAIL_RE.test(String(email || '').trim()); };
-  // Nội dung Điều khoản / Chính sách (type: terms | privacy | refund) để hiện trong sheet khi chưa có màn 9.5.
   api.getPolicy = function (type) { return TTV.Store.get('policies', type); };
-  // Lưu họ tên + email lần đầu (bắt buộc đã tick điều khoản).
   api.completeOnboarding = function (data) {
     var s = TTV.auth.getSession();
     if (!s || s.account_type !== 'customer') return Promise.reject(fail('NO_SESSION', 'Phiên đăng nhập đã hết, hãy đăng nhập lại.'));
@@ -193,7 +182,6 @@ window.TTV = window.TTV || {};
     }).then(function (user) { TTV.auth.updateSession({ name: user.name }); return user; });
   };
 
-  /* ===== 2.4 Đăng nhập staff / thợ ===== */
   var STAFF_ROLES = ['SUPER_ADMIN', 'ADMIN', 'SUPPORT'];
   var STAFF_MAX_FAILS = 5, STAFF_LOCK_MS = 5 * 60 * 1000;
   api.STAFF_ROLES = STAFF_ROLES;
@@ -205,7 +193,6 @@ window.TTV = window.TTV || {};
   };
   api.isStaffSide = function (role) { return role === 'VENDOR' || STAFF_ROLES.indexOf(role) >= 0; };
 
-  // Tài khoản admin đầu tiên: seed để trống mật khẩu, lần chạy đầu băm TTV_CONFIG.seedPassword (không lưu mật khẩu rõ).
   api.ensureSeedStaff = function () {
     var cfg = window.TTV_CONFIG || {}, username = cfg.seedUser || 'admin', password = cfg.seedPassword;
     if (!password) return Promise.resolve(false);
@@ -236,7 +223,6 @@ window.TTV = window.TTV || {};
     });
   }
 
-  // Trả {role, next, must_change_pw}. Lỗi chung "sai tên đăng nhập hoặc mật khẩu" để không lộ tài khoản có tồn tại.
   api.loginStaff = function (usernameInput, password) {
     var username = String(usernameInput || '').trim().toLowerCase();
     if (!username || !password) return Promise.reject(fail('MISSING', 'Vui lòng nhập tên đăng nhập và mật khẩu.'));
@@ -276,7 +262,6 @@ window.TTV = window.TTV || {};
     return '';
   };
 
-  // Đổi mật khẩu của tài khoản đang đăng nhập (ép đổi lần đầu hoặc đổi tự nguyện).
   api.changePassword = function (newPassword, confirmPassword) {
     var s = TTV.auth.getSession();
     if (!s || !api.isStaffSide(s.role)) return Promise.reject(fail('NO_SESSION', 'Phiên đăng nhập đã hết, hãy đăng nhập lại.'));
@@ -296,5 +281,35 @@ window.TTV = window.TTV || {};
       TTV.auth.updateSession({ must_change_pw: false });
       if (table === 'staff') return TTV.Utils.audit('auth.change_password', { target_table: 'staff', target_id: s.account_id }).catch(function () {});
     }).then(function () { return { next: api.homeRouteFor(s.role) }; });
+  };
+
+  function store() {
+    if (!TTV.Store) return Promise.reject(new Error('Store chưa sẵn sàng.'));
+    return TTV.Store;
+  }
+  api.listServices = function () {
+    var order = ['moving', 'warehouse', 'furniture', 'office', 'construction', 'hourly', 'goods'];
+    return store().list('services').then(function (rows) {
+      return (rows || []).slice().sort(function (a, b) {
+        var ia = order.indexOf(a.code || a.id), ib = order.indexOf(b.code || b.id);
+        return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+      });
+    });
+  };
+  api.listBanners = function () {
+    return store().list('banners').then(function (rows) {
+      return (rows || []).filter(function (row) { return row.active !== false; })
+        .sort(function (a, b) { return (Number(a.sort) || 0) - (Number(b.sort) || 0); });
+    });
+  };
+  api.getSetting = function (key) {
+    return store().get('app_settings', key).then(function (row) {
+      return row ? row.value : null;
+    });
+  };
+  api.unreadNotificationCount = function () {
+    return store().query('notifications', { is_read: false }).then(function (rows) {
+      return (rows || []).length;
+    });
   };
 })(window.TTV);

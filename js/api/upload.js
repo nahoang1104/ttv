@@ -110,7 +110,6 @@ window.TTV = window.TTV || {};
     chooseDirectory: chooseDirectory,
     getDirectory: function (requestPermission) { return getUploadsDirectory(requestPermission !== false); },
     hasDirectory: function () { return loadHandle().then(function (h) { return !!h; }); },
-    compressImage: imageToBlob,
     validateVideo: validateVideo,
     upload: writeFile,
     maxVideoSeconds: MAX_VIDEO_SECONDS

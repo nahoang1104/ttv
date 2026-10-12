@@ -2,7 +2,7 @@
 window.TTV = window.TTV || {};
 (function (TTV) {
   'use strict';
-  var SEED_VERSION = '2026-10-v1';
+  var SEED_VERSION = '2026-10-v2';
   var services = [
     {id:'moving',code:'moving',name:'Chuyển nhà',desc:'Chuyển nhà trọn gói, có thợ + xe',icon:'🏠',base_price:50000,unit:'lượt'},
     {id:'warehouse',code:'warehouse',name:'Bốc xếp kho',desc:'Bốc/dỡ hàng kho, tính theo khối',icon:'📦',base_price:100000,unit:'khối'},
@@ -40,7 +40,7 @@ window.TTV = window.TTV || {};
     {id:'refund',type:'refund',title:'Chính sách hoàn tiền',content:'Các khoản giữ và hoàn tiền chỉ mô phỏng luồng nghiệp vụ; không phát sinh giao dịch thanh toán thật.',updated_at:'2026-10-09T00:00:00.000Z'}
   ];
   var banners = [
-    {id:'banner-welcome',title:'Chào mừng đến TingTingVac',subtitle:'Đặt thợ bốc vác nhanh chóng',type:'member',target:'none',image_path:'',sort:1,active:true},
+    {id:'banner-welcome',title:'Ưu đãi Hội viên',subtitle:'Tiết kiệm đến 20% mọi đơn bốc vác',type:'member',target:'coupon',image_path:'',sort:1,active:true},
     {id:'banner-coupon',title:'Ưu đãi khách mới',subtitle:'Nhập mã TTVNEW10',type:'promo',target:'coupon',image_path:'',sort:2,active:true},
     {id:'banner-explore',title:'Dịch vụ an tâm',subtitle:'Đội ngũ thợ sẵn sàng hỗ trợ',type:'explore',target:'none',image_path:'',sort:3,active:true}
   ];
@@ -69,6 +69,16 @@ window.TTV = window.TTV || {};
       if (!store) return Promise.reject(new Error('TTV.Store chưa được nạp.'));
       return store.get('__meta', 'seed_version').then(function (meta) {
         if (meta && meta.value === SEED_VERSION && !options.force) return {seeded:false,reason:'already-seeded',version:SEED_VERSION};
+        if (meta && meta.value && meta.value !== SEED_VERSION && !options.force) {
+          return store.get('banners', 'banner-welcome').then(function (row) {
+            var next = (!row || row.title === 'Chào mừng đến TingTingVac') ? store.put('banners', banners[0]) : Promise.resolve();
+            return next.then(function () {
+              return store.put('__meta', {id:'seed_version',value:SEED_VERSION,seeded_at:new Date().toISOString(),migrated_from:meta.value}).then(function () {
+                return {seeded:false,reason:'migrated',version:SEED_VERSION,from:meta.value};
+              });
+            });
+          });
+        }
         var plan = [
           ['services',services],['pricing_config',pricing],['vendors',vendors],['coupons',coupons],
           ['faqs',faqs],['policies',policies],['banners',banners],['app_settings',settings]
