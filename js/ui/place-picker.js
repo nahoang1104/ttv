@@ -90,12 +90,15 @@ TTV.ui = TTV.ui || {};
         '</label>' +
         '<div class="map-sheet__suggest" data-map-suggest hidden></div>' +
       '</div>' +
-      '<div class="map-sheet__map" data-map-canvas></div>' +
-      '<div class="map-sheet__zoom">' +
-        '<button type="button" data-map="zoom-in" aria-label="Phóng to">+</button>' +
-        '<button type="button" data-map="zoom-out" aria-label="Thu nhỏ">−</button>' +
+      '<div class="map-sheet__map">' +
+        '<div class="map-sheet__canvas" data-map-canvas></div>' +
+        '<div class="map-sheet__zoom">' +
+          '<button type="button" data-map="zoom-in" aria-label="Phóng to">+</button>' +
+          '<button type="button" data-map="zoom-out" aria-label="Thu nhỏ">−</button>' +
+        '</div>' +
+        '<button type="button" class="map-sheet__me" data-map="me">' +
+          '<span class="map-sheet__me-ico" aria-hidden="true"></span> Vị trí của tôi</button>' +
       '</div>' +
-      '<button type="button" class="map-sheet__me" data-map="me">Vị trí của tôi</button>' +
       '<p class="map-sheet__addr"><span class="map-sheet__pin"></span><span data-map-addr>Đang lấy địa chỉ…</span></p>' +
       '<button type="button" class="btn btn-primary btn-block map-sheet__ok" data-map="ok" disabled>✓  Xác nhận địa điểm</button>';
 
