@@ -1081,6 +1081,16 @@ window.TTV = window.TTV || {};
     if (!Array.isArray(v.services) || v.services.indexOf(o.service) < 0) return false;
     return areaMatches(v.areas, placeOf(o, 'pickup').addr);
   }
+  // Lý do cụ thể đơn không khớp thợ ('' = khớp). Thứ tự: số thợ (mục 4 "Loại đơn") → loại nhà cung cấp → dịch vụ → khu vực.
+  function fitReason(o, v) {
+    var provider = o.provider_type || 'any', workers = Math.max(1, Number(o.workers) || 1), size = Math.max(1, Number(v.team_size) || 1);
+    if (workers >= 2 && v.type === 'personal') return 'Thợ cá nhân không nhận đơn từ 2 thợ trở lên.';
+    if (workers > size) return 'Đơn cần ' + workers + ' thợ, đội của bạn chỉ có ' + size + '.';
+    if (provider !== 'any' && provider !== 'all' && provider !== v.type) return 'Khách chỉ nhận loại nhà cung cấp khác.';
+    if (!Array.isArray(v.services) || v.services.indexOf(o.service) < 0) return 'Đơn không thuộc dịch vụ bạn nhận.';
+    if (!areaMatches(v.areas, placeOf(o, 'pickup').addr)) return 'Đơn nằm ngoài khu vực hoạt động của bạn.';
+    return '';
+  }
   function marketView(o, env) {
     var pickup = placeOf(o, 'pickup'), drop = placeOf(o, 'dropoff'), workers = Math.max(1, Number(o.workers) || 1);
     var sv = env.services[o.service] || {}, wt = env.weights[o.weight_tier] || {};
@@ -1093,10 +1103,10 @@ window.TTV = window.TTV || {};
       weight_tier: o.weight_tier || '', weight_name: wt.name || WEIGHT_FALLBACK[o.weight_tier] || '', weight_hint: wt.description || '',
       pickup_floor: Number(o.pickup_floor) || 0, pickup_elevator: !!o.pickup_elevator,
       need_unload: o.need_unload !== false, drop_floor: Number(o.drop_floor) || 0, drop_elevator: !!o.drop_elevator,
-      workers: workers, note: String(o.note || ''), mode: workers >= 2 ? 'fixed' : 'bid',
+      workers: workers, note: String(o.note || ''),
       user_offer: Number(o.user_offer) || 0, offer: api.currentOffer(o), price_breakdown: o.price_breakdown || null,
       deadline: dl, remaining_ms: dl - env.now,
-      my_quote: q ? { id: q.id, status: q.status, price: Number(q.price) || 0 } : null
+      my_quote: q ? { id: q.id, status: q.status, price: Number(q.price) || 0, eta_min: Number(q.eta_min) || 0, message: String(q.message || '') } : null
     };
   }
   function marketEnv(windowCfg, services, quotes) {
@@ -1181,23 +1191,101 @@ window.TTV = window.TTV || {};
       var fits = orderFitsVendor(o, row);
       if (!mine && !hasQuote && !(open && fits)) {
         if (!open) throw fail('UNAVAILABLE', 'Đơn này không còn nhận báo giá.');
-        throw fail('NOT_ELIGIBLE', 'Đơn này không phù hợp với dịch vụ, khu vực hoặc quy mô đội của bạn.');
+        throw fail('NOT_ELIGIBLE', fitReason(o, row) || 'Đơn này không phù hợp với hồ sơ của bạn.');
       }
       var view = marketView(o, env);
       view.is_mine = mine;
       view.can_act = open && fits && !!row.is_online && !vendorWalletBlocked(row, limit); // 5.4 / 5.5 dùng để bật nút Báo giá / Nhận đơn
-      view.action = view.can_act ? (view.mode === 'fixed' ? 'accept' : 'quote') : null;
+      view.action = view.can_act ? 'quote' : null; // mọi đơn (1 thợ hay ≥ 2 thợ) cùng quy trình báo giá
+      view.min_amount = Math.max(1, Math.round(Number(p[6] && p[6].min_amount) || 10000));
+      view.fit_message = fits ? '' : fitReason(o, row);
+      view.block_reason = view.can_act ? '' : (o.status !== 'finding' ? 'taken' : !open ? 'expired' : !fits ? 'not_fit' : !row.is_online ? 'offline' : 'wallet');
       view.media = (p[4] || []).map(function (m) { return { id: String(m.id), kind: m.kind === 'video' ? 'video' : 'image', path: String(m.path || ''), duration: Number(m.duration) || 0 }; })
         .filter(function (m) { return m.path; })
         .sort(function (a, b) { return (a.kind === b.kind ? 0 : a.kind === 'image' ? -1 : 1); });
+      // Tên khách luôn hiện; SĐT chỉ trả về khi đơn là của thợ và đã ghép (matched trở đi) — chưa ghép thì không rời khỏi API
       view.customer = null;
-      if (mine && ACTIVE_JOB[o.status] && o.user_id) {
-        return TTV.Store.get('users', o.user_id).then(function (u) {
-          if (u) view.customer = { name: u.name || '', phone: u.phone || '' };
-          return view;
-        });
-      }
-      return view;
+      if (!o.user_id) return view;
+      var showPhone = mine && !!ACTIVE_JOB[o.status];
+      return TTV.Store.get('users', o.user_id).then(function (u) {
+        if (u) view.customer = { name: u.name || '', avatar: u.avatar_path || '', phone: showPhone ? (u.phone || '') : null };
+        return view;
+      });
+    });
+  };
+
+  /* ===== 5.4 Báo giá (mọi đơn, 1 thợ hay ≥ 2 thợ): gửi / sửa / rút ===== */
+  var QUOTE_ETA_MAX = 240, QUOTE_MSG_MAX = 200;
+  function validateQuoteInput(input, cap, min) {
+    var errors = {}, price = Number(input && input.price), eta = Number(input && input.eta_min);
+    var msg = String(input && input.message != null ? input.message : '').trim();
+    if (!Number.isInteger(price)) errors.price = 'Hãy nhập giá báo bằng số nguyên (đồng).';
+    else if (price < min) errors.price = 'Giá báo tối thiểu ' + TTV.Utils.money(min) + '.';
+    else if (price > cap) errors.price = 'Giá báo tối đa bằng số tiền khách trả (' + TTV.Utils.money(cap) + ').';
+    if (!Number.isInteger(eta) || eta < 1 || eta > QUOTE_ETA_MAX) errors.eta_min = 'Thời gian đến từ 1 đến ' + QUOTE_ETA_MAX + ' phút.';
+    if (msg.length > QUOTE_MSG_MAX) errors.message = 'Lời nhắn tối đa ' + QUOTE_MSG_MAX + ' ký tự.';
+    return { ok: !Object.keys(errors).length, errors: errors, price: price, eta: eta, message: msg };
+  }
+  function latestQuote(rows) { // mỗi thợ chỉ có 1 dòng/đơn; nếu lỡ có nhiều thì lấy dòng mới nhất
+    return (rows || []).slice().sort(function (a, b) { return String(b.updated_at || b.created_at || '').localeCompare(String(a.updated_at || a.created_at || '')); })[0] || null;
+  }
+  function loadQuoteContext(orderId) {
+    var oid = String(orderId || ''), vid;
+    return requireVendorSelf().then(function (id) {
+      vid = id;
+      return Promise.all([
+        TTV.Store.get('vendors', id), vendorWalletLimit(), TTV.Store.get('orders', oid),
+        TTV.Store.query('quotes', function (q) { return String(q.vendor_id) === id && String(q.order_id) === oid; }),
+        TTV.Store.get('pricing_config', 'default')
+      ]);
+    }).then(function (p) {
+      var row = p[0];
+      if (!row) throw notFoundVendor();
+      if ((row.status || 'active') === 'locked') throw fail('LOCKED', 'Tài khoản của bạn đang bị khóa. Vui lòng liên hệ quản trị viên.');
+      if (!p[2]) throw fail('ORDER_NOT_FOUND', 'Không tìm thấy đơn này.');
+      return { vid: vid, oid: oid, vendor: row, limit: p[1], order: p[2], cur: latestQuote(p[3]), cfg: p[4] || {} };
+    });
+  }
+  // Gửi báo giá mới / sửa báo giá đang chờ / báo lại sau khi đã rút. Input: { order_id, price, eta_min, message }
+  api.submitQuote = function (input) {
+    input = input || {};
+    return loadQuoteContext(input.order_id).then(function (c) { // đọc lại đơn ngay trước khi ghi
+      var o = c.order, cur = c.cur;
+      if (o.status !== 'finding') throw fail('ORDER_TAKEN', 'Đơn đã được ghép thợ khác hoặc không còn nhận báo giá.');
+      if (deadlineMs(o, c.cfg.quote_window_min) <= Date.now()) throw fail('UNAVAILABLE', 'Đơn đã hết hạn nhận báo giá.');
+      var why = fitReason(o, c.vendor);
+      if (why) throw fail('NOT_ELIGIBLE', why);
+      if (!c.vendor.is_online) throw fail('OFFLINE', 'Hãy bật Sẵn sàng nhận đơn để báo giá.');
+      if (vendorWalletBlocked(c.vendor, c.limit)) throw fail('WALLET_LOCKED', 'Số dư ví đang âm quá ngưỡng nên bạn tạm không báo giá được.');
+      if (cur && cur.status === 'accepted') throw fail('QUOTE_LOCKED', 'Báo giá của bạn đã được chọn, không sửa được nữa.');
+      var cap = api.currentOffer(o), min = Math.max(1, Math.round(Number(c.cfg.min_amount) || 10000));
+      var v = validateQuoteInput(input, cap, min);
+      if (!v.ok) throw fail('VALIDATION', 'Thông tin báo giá chưa hợp lệ.', { errors: v.errors });
+      var now = new Date().toISOString(), isNew = !cur || cur.status !== 'pending';
+      var row = cur ? Object.assign({}, cur) : { id: TTV.Utils.id(), order_id: c.oid, vendor_id: c.vid, created_at: now };
+      if (isNew) row.created_at = now; // báo lại sau khi rút = báo giá mới
+      Object.assign(row, { price: v.price, eta_min: v.eta, message: v.message, status: 'pending', updated_at: now, withdrawn_at: null });
+      var ev = { id: TTV.Utils.id(), order_id: c.oid, event: 'quoted', actor_type: 'vendor', actor_id: c.vid,
+        note: (isNew ? 'Báo giá ' : 'Sửa báo giá ') + v.price, created_at: now };
+      var noti = isNew ? { id: TTV.Utils.id(), category: 'order', title: 'Có báo giá mới', body: 'Đơn ' + TTV.Utils.orderCode(c.oid) + ' có báo giá mới.',
+        order_id: c.oid, is_read: false, created_at: now, recipient_type: 'customer', recipient_id: o.user_id } : null;
+      return TTV.Store.put('quotes', row).then(function () { return TTV.Store.put('order_events', ev); })
+        .then(function () { return noti && o.user_id ? TTV.Store.put('notifications', noti) : null; })
+        .then(function () { return row; });
+    });
+  };
+  // Rút báo giá: chỉ khi còn `pending` và đơn còn `finding`. Rút xong báo lại được nếu đơn còn hạn.
+  api.withdrawQuote = function (orderId) {
+    return loadQuoteContext(orderId).then(function (c) {
+      var cur = c.cur;
+      if (!cur) throw fail('QUOTE_NOT_FOUND', 'Bạn chưa có báo giá cho đơn này.');
+      if (cur.status === 'accepted') throw fail('QUOTE_LOCKED', 'Báo giá đã được chọn, không rút được.');
+      if (cur.status !== 'pending') throw fail('QUOTE_INACTIVE', 'Báo giá này không còn hiệu lực.');
+      if (c.order.status !== 'finding') throw fail('ORDER_TAKEN', 'Đơn đã được ghép thợ khác hoặc không còn nhận báo giá.');
+      var now = new Date().toISOString();
+      var row = Object.assign({}, cur, { status: 'withdrawn', withdrawn_at: now, updated_at: now });
+      var ev = { id: TTV.Utils.id(), order_id: c.oid, event: 'quoted', actor_type: 'vendor', actor_id: c.vid, note: 'Rút báo giá', created_at: now };
+      return TTV.Store.put('quotes', row).then(function () { return TTV.Store.put('order_events', ev); }).then(function () { return row; });
     });
   };
 
@@ -1349,7 +1437,18 @@ window.TTV = window.TTV || {};
       return TTV.Store.put('order_events', ev);
     }).then(function () {
       return noti ? TTV.Store.put('notifications', noti) : null;
+    }).then(function () {
+      return closePendingQuotes(fresh.id, 'expired', now); // đơn đóng thì báo giá chờ chọn → hết hạn (5.7 tab Hết hạn)
     }).then(function () { return next; });
+  }
+  // Đổi mọi báo giá `pending` của đơn sang trạng thái mới (expired/rejected), trừ báo giá có id = exceptId.
+  function closePendingQuotes(orderId, status, now, exceptId) {
+    return TTV.Store.query('quotes', function (q) { return String(q.order_id) === String(orderId) && q.status === 'pending' && String(q.id) !== String(exceptId || ''); })
+      .then(function (rows) {
+        return rows.reduce(function (chain, q) {
+          return chain.then(function () { return TTV.Store.put('quotes', Object.assign({}, q, { status: status, updated_at: now })); });
+        }, Promise.resolve()).then(function () { return rows; });
+      });
   }
 
   api.getOrder = function (id) {
@@ -1396,6 +1495,72 @@ window.TTV = window.TTV || {};
         return cancelFindingRow(fresh, {
           reason: 'Khách hủy', actor_type: 'customer', actor_id: s.account_id
         });
+      });
+    });
+  };
+  /* ===== 5.6 Màn "Đang nhận báo giá" (khách): xem báo giá của mọi thợ/tổ đội/công ty, tự chọn ===== */
+  // Khách chỉ thấy báo giá `pending` (đơn đang `finding`) hoặc báo giá `accepted` (đơn đã ghép). SĐT thợ chỉ có ở báo giá đã được chọn.
+  api.listOrderQuotes = function (id) {
+    var oid = String(id);
+    return api.getOrder(oid).then(function (order) {
+      return Promise.all([
+        TTV.Store.query('quotes', function (q) { return String(q.order_id) === oid; }),
+        TTV.Store.list('vendors')
+      ]).then(function (p) {
+        var vmap = {}; (p[1] || []).forEach(function (v) { vmap[String(v.id)] = v; });
+        var want = order.status === 'finding' ? 'pending' : 'accepted';
+        var list = (p[0] || []).filter(function (q) { return q.status === want; }).map(function (q) {
+          var v = vmap[String(q.vendor_id)] || {};
+          return {
+            id: String(q.id), order_id: oid, vendor_id: String(q.vendor_id), price: Number(q.price) || 0, eta_min: Number(q.eta_min) || 0,
+            message: String(q.message || ''), status: q.status, created_at: q.created_at, updated_at: q.updated_at,
+            vendor: {
+              id: String(q.vendor_id), name: v.name || '', type: v.type || 'personal', team_size: Number(v.team_size) || 1,
+              rating: Number(v.rating) || 0, jobs_done: Number(v.jobs_done) || 0, avatar_path: v.avatar_path || '',
+              phone: q.status === 'accepted' ? (v.phone || '') : ''
+            }
+          };
+        });
+        list.sort(function (a, b) { return (a.price - b.price) || String(a.created_at || '').localeCompare(String(b.created_at || '')); }); // thấp → cao
+        return { order: order, quotes: list };
+      });
+    });
+  };
+
+  // Khách chọn một báo giá: báo giá → accepted, còn lại → rejected, đơn → matched (final_price = giá báo giá được chọn).
+  api.chooseQuote = function (orderId, quoteId) {
+    var s = customerSession();
+    if (!s) return Promise.reject(fail('UNAUTH', 'Hãy đăng nhập.'));
+    var oid = String(orderId), qid = String(quoteId);
+    return api.expireFindingIfNeeded(oid).then(function () { // đọc lại trạng thái ngay trước khi ghi
+      return Promise.all([TTV.Store.get('orders', oid), TTV.Store.get('quotes', qid)]);
+    }).then(function (p) {
+      var o = p[0], q = p[1];
+      if (!o || o.user_id !== s.account_id) throw fail('NOT_FOUND', 'Không tìm thấy đơn hàng.');
+      if (o.status === 'cancelled') throw fail('CONFLICT', 'Đơn đã bị hủy hoặc hết hạn nhận báo giá.');
+      if (o.status !== 'finding') throw fail('CONFLICT', 'Đơn đã được ghép thợ.');
+      if (!q || String(q.order_id) !== oid) throw fail('QUOTE_NOT_FOUND', 'Không tìm thấy báo giá này.');
+      if (q.status !== 'pending') throw fail('QUOTE_GONE', 'Thợ vừa rút hoặc sửa báo giá. Hãy xem lại danh sách.');
+      return TTV.Store.get('vendors', q.vendor_id).then(function (v) {
+        if (!v || (v.status || 'active') === 'locked') throw fail('QUOTE_GONE', 'Thợ này hiện không nhận đơn được. Hãy chọn thợ khác.');
+        var price = Number(q.price) || 0, now = new Date().toISOString();
+        var tl = (Array.isArray(o.timeline) ? o.timeline : []).concat([{ event: 'matched', at: now }]);
+        // Đơn ví: hoàn phần chênh lệch user_offer − final_price sẽ nối ở task 7.3 (hiện đơn mới chỉ trả tiền mặt).
+        var next = Object.assign({}, o, { status: 'matched', vendor_id: String(q.vendor_id), accepted_quote_id: qid, final_price: price, matched_at: now, timeline: tl });
+        var ev = { id: TTV.Utils.id(), order_id: oid, event: 'matched', actor_type: 'customer', actor_id: s.account_id, note: 'Chọn ' + (v.name || q.vendor_id) + ' · ' + price, created_at: now };
+        return TTV.Store.put('orders', next).then(function () {
+          return TTV.Store.put('quotes', Object.assign({}, q, { status: 'accepted', updated_at: now }));
+        }).then(function () {
+          return closePendingQuotes(oid, 'rejected', now, qid);
+        }).then(function (rejected) {
+          var code = TTV.Utils.orderCode(oid);
+          function noti(vendorId, title, body) {
+            return TTV.Store.put('notifications', { id: TTV.Utils.id(), category: 'order', title: title, body: body, order_id: oid, is_read: false, created_at: now, recipient_type: 'vendor', recipient_id: String(vendorId) });
+          }
+          return noti(q.vendor_id, 'Bạn đã được chọn', 'Khách đã chọn báo giá của bạn cho đơn ' + code + '.').then(function () {
+            return rejected.reduce(function (chain, r) { return chain.then(function () { return noti(r.vendor_id, 'Báo giá không được chọn', 'Đơn ' + code + ' đã được ghép thợ khác.'); }); }, Promise.resolve());
+          });
+        }).then(function () { return TTV.Store.put('order_events', ev); }).then(function () { return { order: next, quote_id: qid }; });
       });
     });
   };

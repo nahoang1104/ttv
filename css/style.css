@@ -952,9 +952,60 @@ button.vendor-stat:active{background:#f3f8fe}
 .vo-customer b,.vo-customer span{display:block}
 .vo-customer span{font-size:var(--fs-sm);color:var(--c-text-muted)}
 .vo-customer .btn{flex:none;min-height:38px;padding:6px 14px}
+.vo-customer>.avatar{display:grid;place-items:center;flex:none;width:48px;height:48px;overflow:hidden;border-radius:50%;background:linear-gradient(135deg,#1b7be4,#0643a0);color:#fff;font-size:20px;font-weight:700;line-height:1;box-shadow:0 2px 8px rgba(5,63,156,.25)}
+.vo-customer>.avatar img{width:100%;height:100%;object-fit:cover}
+.vo-customer .vo-locked{font-size:var(--fs-xs,12px);line-height:1.4}
 .vo-gap{margin-top:10px}
 .vo-actions{position:sticky;bottom:0;z-index:12;margin-top:auto;padding:12px 16px max(12px,env(safe-area-inset-bottom));background:#fff;border-top:1px solid var(--c-border)}
 .vo-actions[hidden]{display:none}
 .vo-lightbox{position:fixed;inset:0;z-index:200;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(10,20,40,.88)}
 .vo-lightbox img{max-width:100%;max-height:100%;object-fit:contain;border-radius:var(--r-md)}
 .vo-lightbox__close{position:absolute;top:calc(10px + env(safe-area-inset-top));right:14px;width:40px;height:40px;border:0;border-radius:50%;background:rgba(255,255,255,.2);color:#fff;font-size:26px}
+/* Báo giá (thợ) — 5.4 */
+.vq-bar{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.vq-bar__info{min-width:0}.vq-bar__info small{display:block;font-size:var(--fs-xs);color:var(--c-text-muted)}
+.vq-bar__info b{display:block;font-size:20px;line-height:1.2;color:var(--c-primary-600)}
+.vq-bar__info span{display:block;font-size:var(--fs-xs);color:var(--c-text-muted)}
+.vq-bar__btns{display:flex;gap:8px;flex:none}.vq-bar__btns .btn{min-height:40px;padding:8px 14px}
+.vq-msg{margin:8px 0 0;font-size:var(--fs-sm);color:var(--c-text-muted);overflow-wrap:anywhere}
+.vq-hint{margin:8px 0 0;text-align:center;font-size:var(--fs-xs);color:var(--c-text-muted)}
+.vq-reason{margin:8px 0 0;padding:8px 10px;border-radius:var(--r-md);background:#fff8e1;color:#8a6100;font-size:var(--fs-sm)}
+.vq-reason--solo{margin:0}
+.vq-form{display:flex;flex-direction:column;gap:14px}
+.vq-limits{margin:0;padding:8px 10px;border-radius:var(--r-md);background:var(--c-primary-100);color:var(--c-primary-600);font-size:var(--fs-sm)}
+.vq-field{display:flex;flex-direction:column;gap:6px}.vq-field>span{font-weight:600;font-size:var(--fs-sm)}
+.vq-money{display:flex;align-items:center;gap:8px;min-height:48px;padding:0 12px;border:1px solid var(--c-border);border-radius:var(--r-md);background:#f8fafd}
+.vq-money:focus-within{border-color:var(--c-primary-600);background:#fff;box-shadow:0 0 0 3px #1b7be41a}
+.vq-money input{flex:1;min-width:0;min-height:44px;padding:0;border:0;background:transparent;font-size:18px;font-weight:700;color:var(--c-text)}
+.vq-money input:focus{outline:0}.vq-money i{font-style:normal;color:var(--c-text-muted)}
+.vq-field textarea{width:100%;padding:10px 12px;border:1px solid var(--c-border);border-radius:var(--r-md);background:#f8fafd;font:inherit;resize:vertical}
+.vq-field textarea:focus{outline:0;border-color:var(--c-primary-600);background:#fff}
+.vq-link{align-self:flex-start;padding:0;border:0;background:none;color:var(--c-primary-600);font-size:var(--fs-sm);font-weight:600}
+.vq-chips{display:flex;flex-wrap:wrap;gap:8px}.vq-count{align-self:flex-end;color:var(--c-text-faint);font-size:var(--fs-xs)}
+.vq-field .field-error,.vq-form>.field-error{margin:0}
+.vq-footer{display:flex;gap:8px;width:100%}.vq-footer .btn{flex:1}
+.vq-confirm{margin:0 0 8px;font-weight:600}.vq-confirm--sub{font-weight:400;color:var(--c-text-muted);font-size:var(--fs-sm)}
+/* Danh sách báo giá (khách) — 5.6 */
+.qc-title{margin:16px 2px 10px;font-size:15px;font-weight:800;color:#14213d}
+.qc-card{margin:0 0 12px;padding:14px;border:1px solid #e8edf4;border-radius:var(--r-lg);background:#fff;box-shadow:var(--shadow-card)}
+.qc-card.is-best{border-color:#22b8d8;box-shadow:0 4px 14px rgba(34,184,216,.18)}
+.qc-card--plain{margin:0;padding:0;border:0;box-shadow:none}
+.qc-head{display:flex;align-items:center;gap:10px}
+.qc-head>.avatar{display:grid;place-items:center;flex:none;width:44px;height:44px;overflow:hidden;border-radius:50%;background:linear-gradient(135deg,#1b7be4,#0643a0);color:#fff;font-size:18px;font-weight:700;line-height:1}
+.qc-head>.avatar img{width:100%;height:100%;object-fit:cover}
+.qc-who{flex:1;min-width:0}.qc-who b,.qc-who span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.qc-who b{font-size:15px;color:#14213d}.qc-who span{font-size:12px;color:var(--c-text-muted)}
+.qc-price{flex:none;text-align:right}.qc-price b{display:block;font-size:19px;line-height:1.2;color:var(--c-primary-600)}
+.qc-price small{display:block;font-size:11px;color:#16a34a}
+.qc-meta{margin:8px 0 0;font-size:13px;color:#475569}.qc-meta--eta{margin-top:2px;color:var(--c-text-muted)}
+.qc-msg{margin:8px 0 0;padding:8px 10px;border-radius:var(--r-md);background:#f4f7fb;font-size:13px;color:#334155;overflow-wrap:anywhere}
+.qc-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px}
+.qc-tag{padding:3px 10px;border-radius:999px;background:#e0f7fb;color:#0b8ea6;font-size:12px;font-weight:700}
+.qc-pick{min-height:42px;padding:0 26px;border:0;border-radius:999px;background:var(--grad-button);color:#fff;font-weight:700;font-size:15px;box-shadow:0 4px 10px #1b7be42b}
+.qc-pick:active{transform:scale(.97)}
+.qc-matched{text-align:center}.qc-matched h3{margin:10px 0 4px;font-size:18px}.qc-matched p{margin:0;font-size:13px;color:var(--c-text-muted)}
+.qc-matched .quotes-code{margin:8px 0 0}
+.qc-matched__icon{display:grid;place-items:center;width:52px;height:52px;margin:0 auto;border-radius:50%;background:#dcfce7;color:#16a34a;font-size:26px;font-weight:800}
+.qc-call{margin-top:12px}
+.quotes-dlg__yes--ok{background:var(--grad-button)}
+.quotes-dlg__err{margin:-6px 0 12px;color:var(--c-danger);font-size:13px}

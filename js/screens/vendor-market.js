@@ -43,7 +43,7 @@ TTV.screens = TTV.screens || {};
         '<span class="vm-card__icon" aria-hidden="true">' + esc(o.service_icon) + '</span>' +
         '<div class="vm-card__title"><strong>' + esc(o.service_name) + '</strong>' +
           '<span>' + esc(o.code) + ' · ' + esc(TTV.Utils.relativeTime(o.created_at)) + '</span></div>' +
-        '<div class="vm-card__badges">' + speedBadge(o.speed) + (o.my_quote ? C.badge(t('vendorMarket.quoted'), 'info') : '') + '</div>' +
+        '<div class="vm-card__badges">' + speedBadge(o.speed) + (o.my_quote && o.my_quote.status === 'pending' ? C.badge(t('vendorMarket.quoted'), 'info') : '') + '</div>' +
       '</div>' +
       '<ul class="vm-route">' +
         '<li><i class="vm-dot vm-dot--from"></i><span>' + esc(o.pickup.addr || t('vendorMarket.noAddr')) + '</span></li>' +

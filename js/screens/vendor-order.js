@@ -49,7 +49,8 @@ TTV.screens = TTV.screens || {};
       '<small>' + esc(t('vendorOrder.amount.max')) + '</small>' +
       '<strong>' + esc(vnd(v.offer)) + '</strong>' +
       (v.speed === 'urgent' ? '<p class="vo-urgent">' + esc(t('vendorOrder.amount.urgent')) + '</p>' : '') +
-      '<p class="vo-mode">' + esc(v.mode === 'fixed' ? t('vendorOrder.mode.fixed', { n: v.workers }) : t('vendorOrder.mode.bid')) + '</p>' +
+      '<p class="vo-mode">' + esc(t('vendorOrder.mode.bid')) + '</p>' +
+      (v.workers >= 2 ? '<p class="vo-mode">' + esc(t('vendorOrder.mode.team', { n: v.workers })) + '</p>' : '') +
       quote + remainingLine(v) + ref + '</section>';
   }
   function routeCard(v) {
@@ -98,10 +99,12 @@ TTV.screens = TTV.screens || {};
   function customerCard(v) {
     var body;
     if (v.customer) {
-      var tel = String(v.customer.phone || '').replace(/[^\d+]/g, '');
-      body = '<div class="vo-customer">' + C.avatar(v.customer.name || '?', '', { size: 'md' }) +
-        '<div><b>' + esc(v.customer.name || '—') + '</b><span>' + esc(v.customer.phone || '') + '</span></div>' +
-        (tel ? '<a class="btn btn-secondary" href="tel:' + esc(tel) + '">' + esc(t('vendorOrder.customer.call')) + '</a>' : '') + '</div>';
+      // Tên luôn hiện; SĐT + nút Gọi chỉ khi API trả phone (đơn của thợ, đã ghép)
+      var phone = v.customer.phone, tel = String(phone || '').replace(/[^\d+]/g, '');
+      body = '<div class="vo-customer">' + C.avatar(v.customer.name || '?', v.customer.avatar || '', { size: 'md' }) +
+        '<div><b>' + esc(v.customer.name || t('vendorOrder.customer.noName')) + '</b>' +
+          (phone ? '<span>' + esc(phone) + '</span>' : '<span class="vo-locked">🔒 ' + esc(t('vendorOrder.customer.phoneHidden')) + '</span>') + '</div>' +
+        (phone && tel ? '<a class="btn btn-secondary" href="tel:' + esc(tel) + '">' + esc(t('vendorOrder.customer.call')) + '</a>' : '') + '</div>';
     } else body = '<p class="vo-empty">' + esc(t('vendorOrder.customer.hidden')) + '</p>';
     return '<section class="vo-card"><h3>' + esc(t('vendorOrder.customer.title')) + '</h3>' + body + '</section>';
   }
@@ -153,6 +156,12 @@ TTV.screens = TTV.screens || {};
     if (e.target.closest('[data-vo-action="retry"]')) load(currentId, false);
   }
   function bindMedia() {
+    rootEl.querySelectorAll('.vo-customer .avatar img').forEach(function (img) { // ảnh đại diện lỗi → về chữ cái đầu
+      img.addEventListener('error', function () {
+        var box = img.parentNode, name = (img.getAttribute('alt') || '?').trim();
+        if (box) box.textContent = (name.charAt(0) || '?').toUpperCase();
+      });
+    });
     rootEl.querySelectorAll('.vo-photo img').forEach(function (img) {
       img.addEventListener('error', function () { var b = img.closest('.vo-photo'); if (b) b.classList.add('is-error'); });
     });
