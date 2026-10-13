@@ -118,23 +118,7 @@ window.TTV = window.TTV || {};
     nw.focus();
   }
 
-  /* ===== Màn tạm cho tới task 3.1 (admin) và 5.1 (thợ); guard đầy đủ làm ở 2.5 ===== */
-  function placeholder(title, note) {
-    return function () {
-      var root = app(), s = staffSession();
-      if (!s) { TTV.Router.navigate('/staff-login'); return; }
-      if (s.must_change_pw) { TTV.Router.navigate('/change-password'); return; }
-      root.innerHTML = C.header(title, { back: false }) + '<main class="page">' +
-        C.card('<p>Đã đăng nhập: <b>' + esc(s.name || s.account_id) + '</b></p><p>Vai trò: <b>' + esc(s.role) + '</b></p><p class="muted">' + esc(note) + '</p>' +
-          '<button class="btn btn-secondary btn-block" id="tmp-logout">Đăng xuất</button>', { title: 'Phiên đăng nhập' }) + '</main>';
-      $(root, '#tmp-logout').addEventListener('click', function () { TTV.api.logout().then(function () { TTV.Router.navigate('/staff-login'); }); });
-    };
-  }
-  var staffRoute = { roles: ['SUPER_ADMIN'], loginRoute: '/staff-login', deniedRoute: '/staff-login' };
-  var vendorRoute = { roles: ['VENDOR'], loginRoute: '/staff-login', deniedRoute: '/staff-login' };
-
   TTV.screens.staffAuth = { renderStaffLogin: renderStaffLogin, renderChangePassword: renderChangePassword };
   TTV.Router.add('/staff-login', renderStaffLogin);
   TTV.Router.add('/change-password', renderChangePassword);
-  TTV.Router.add('/vendor', placeholder('Khu thợ', 'Màn tạm — khung app thợ làm ở task 5.1.'), vendorRoute);
 })(window.TTV);
