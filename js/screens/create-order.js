@@ -1,14 +1,8 @@
-/* Màn Đặt đơn bốc vác — giao diện (bám docs/reference/05-*). Chưa tạo đơn / tính giá. */
+/* Màn Đặt đơn bốc vác — form + xác nhận + gọi TTV.api.createOrder (IndexedDB). */
 window.TTV = window.TTV || {};
 TTV.screens = TTV.screens || {};
 (function (TTV) {
   'use strict';
-  var WEIGHTS = [
-    { id: 'light', name: 'Nhẹ', hint: 'Dưới 30kg · vài thùng, đồ lặt vặt' },
-    { id: 'medium', name: 'Vừa', hint: '30-100kg · đồ 1 phòng, vài món nội thất' },
-    { id: 'heavy', name: 'Nặng', hint: '100-300kg · đồ cả căn hộ' },
-    { id: 'very_heavy', name: 'Rất nặng', hint: 'Trên 300kg · nhà nguyên căn, kho hàng' }
-  ];
   var SPEEDS = [
     { id: 'default', name: 'Mặc định', desc: 'Giá tốt nhất — chờ thợ báo giá (thường vài chục phút)' },
     { id: 'fast', name: 'Nhanh', desc: 'Nhận thợ nhanh hơn — giá nhà hơn Mặc định' },
@@ -20,15 +14,20 @@ TTV.screens = TTV.screens || {};
     { id: 'team', name: 'Tổ đội' },
     { id: 'company', name: 'Công ty' }
   ];
-  var SERVICE_IMG = { moving: 'uploads/img-giaodien/chuyennha.png', goods: 'uploads/img-giaodien/bocvachanghoa.png' };
+  var SERVICE_IMG = {
+    moving: 'uploads/img-giaodien/chuyennha.png',
+    furniture: 'uploads/img-giaodien/noithat.png',
+    office: 'uploads/img-giaodien/vanphong.png',
+    goods: 'uploads/img-giaodien/bocvachanghoa.png'
+  };
 
   var MAX_PHOTOS = 7;
   var PHOTO_LOAD_MS = 12000;
-  var MIN_OFFER = 10000;
   var DRAFT_KEY = 'ttv_draft_order';
   var state = null;
   var services = [];
   var rootEl = null;
+  var placing = false;
 
   function esc(v) { return TTV.Components.escape(v); }
   function persistDraft() {
@@ -39,7 +38,7 @@ TTV.screens = TTV.screens || {};
         dropoff: state.dropoff, dropLat: state.dropLat, dropLng: state.dropLng, weight: state.weight,
         pickupFloor: state.pickupFloor, pickupElevator: state.pickupElevator, needUnload: state.needUnload,
         dropFloor: state.dropFloor, dropElevator: state.dropElevator, workers: state.workers, note: state.note,
-        speed: state.speed, provider: state.provider, offer: state.offer, pay: state.pay
+        speed: state.speed, provider: state.provider, pay: state.pay
       }));
     } catch (_) {}
   }
@@ -47,8 +46,10 @@ TTV.screens = TTV.screens || {};
     try { return JSON.parse(sessionStorage.getItem(DRAFT_KEY) || 'null'); } catch (_) { return null; }
   }
   function money(n) { return TTV.Utils.money(n); }
+  function minAmount() { return TTV.pricing && TTV.pricing.minAmount ? TTV.pricing.minAmount() : 0; }
+  function weightList() { return TTV.pricing && TTV.pricing.weightTiers ? TTV.pricing.weightTiers() : []; }
   function weightHint() {
-    var w = WEIGHTS.filter(function (x) { return x.id === state.weight; })[0];
+    var w = weightList().filter(function (x) { return x.id === state.weight; })[0];
     return w ? w.hint : '';
   }
   function speedLabel() {
@@ -325,16 +326,89 @@ TTV.screens = TTV.screens || {};
     return TTV.pricing.urgentMin(currentQuote().total);
   }
   function minOfferNow() {
-    if (state && state.speed === 'urgent') return Math.max(MIN_OFFER, urgentMinOffer());
-    return MIN_OFFER;
-  }
-  function applyUrgentFloor() {
-    if (!state || state.speed !== 'urgent') return;
-    var min = urgentMinOffer();
-    if (offerAmount() < min) state.offer = String(min);
+    if (state && state.speed === 'urgent') return Math.max(minAmount(), urgentMinOffer());
+    return minAmount();
   }
   function canSubmit() {
     return hasRoute() && offerAmount() >= minOfferNow();
+  }
+  function payLabel() {
+    return state && state.pay === 'wallet' ? 'Ví' : 'Tiền mặt';
+  }
+  function pinSvg(kind) {
+    var fill = kind === 'drop' ? '#e5484d' : '#22c55e';
+    return '<svg class="order-confirm__pin" viewBox="0 0 24 24" aria-hidden="true"><path fill="' + fill + '" d="M12 2a7 7 0 0 0-7 7c0 5.25 7 13 7 13s7-7.75 7-13a7 7 0 0 0-7-7zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5z"/></svg>';
+  }
+  function moneyVnd(n) {
+    return TTV.Utils.money(n, { currency: false }) + 'đ';
+  }
+  function openConfirmSheet() {
+    if (!state || !canSubmit()) return;
+    closeSheet();
+    var amt = moneyVnd(offerAmount());
+    var cta = 'Thanh toán ' + amt;
+    var body =
+      '<div class="order-confirm">' +
+        '<div class="order-confirm__route">' +
+          '<div class="order-confirm__stop" title="' + esc(state.pickup) + '">' + pinSvg('pick') + '<span>' + esc(state.pickup) + '</span></div>' +
+          '<span class="order-confirm__arrow" aria-hidden="true">›</span>' +
+          '<div class="order-confirm__stop" title="' + esc(state.dropoff) + '">' + pinSvg('drop') + '<span>' + esc(state.dropoff) + '</span></div>' +
+          '<span class="order-confirm__km">' + esc(kmText()) + '</span>' +
+        '</div>' +
+        '<p class="order-confirm__pay"><span>Phương thức</span><b>' + esc(payLabel()) + '</b></p>' +
+        '<p class="order-confirm__total"><span>Số tiền bạn trả</span><b class="order-confirm__money">' + amt + '</b></p>' +
+        '<p class="order-confirm__note">' +
+          '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" d="M12 3 5 6.2v5.3c0 4.6 3 8.8 7 10 4-1.2 7-5.4 7-10V6.2L12 3z"/><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="m8.6 12.1 2.2 2.2 4.6-4.6"/></svg>' +
+          'Thanh toán được thu trước khi ghép thợ' +
+        '</p>' +
+      '</div>';
+    document.body.insertAdjacentHTML('beforeend', TTV.Components.sheet('Xác nhận đặt đơn', body, {
+      footer: '<div class="order-confirm-acts">' +
+        '<button type="button" class="btn btn-secondary" data-sheet-close>Huỷ</button>' +
+        '<button type="button" class="btn btn-primary" data-action="confirm-place">' + esc(cta) + '</button>' +
+        '</div>'
+    }));
+    var bd = document.querySelector('.sheet-backdrop:last-of-type');
+    if (bd) bd.classList.add('is-order-confirm');
+  }
+  function placeOrder() {
+    if (!state || placing || !canSubmit()) return;
+    placing = true;
+    var btn = document.querySelector('[data-action="confirm-place"]');
+    if (btn) { btn.disabled = true; btn.textContent = 'Đang đặt…'; }
+    var media = (state.images || []).map(function (img) {
+      return { kind: 'image', path: img.path || '', file: img.file || null };
+    });
+    if (state.video) media.push({ kind: 'video', path: state.video.path || '', duration: state.video.duration, file: state.video.file || null });
+    TTV.api.createOrder({
+      service: state.service,
+      pickup: { addr: state.pickup, lat: state.pickupLat, lng: state.pickupLng },
+      dropoff: { addr: state.dropoff, lat: state.dropLat, lng: state.dropLng },
+      distance_km: distanceKm(),
+      weight: state.weight,
+      pickup_floor: state.pickupFloor,
+      pickup_elevator: state.pickupElevator,
+      need_unload: state.needUnload,
+      drop_floor: state.dropFloor,
+      drop_elevator: state.dropElevator,
+      workers: state.workers,
+      note: state.note,
+      speed: state.speed,
+      provider_type: state.provider,
+      user_offer: offerAmount(),
+      pay_method: 'cash',
+      media: media
+    }).then(function (order) {
+      placing = false;
+      closeSheet();
+      try { sessionStorage.removeItem(DRAFT_KEY); } catch (_) {}
+      TTV.Components.toast('Đơn hàng đã được tạo!', 'success');
+      TTV.Router.navigate('/orders/' + order.id + '/quotes');
+    }).catch(function (err) {
+      placing = false;
+      if (btn) { btn.disabled = false; btn.textContent = 'Đặt đơn'; }
+      TTV.Components.toast((err && err.message) || 'Không đặt được đơn.', 'danger');
+    });
   }
   function submitButtonHtml() {
     if (!hasRoute()) {
@@ -363,14 +437,20 @@ TTV.screens = TTV.screens || {};
     if (!hasRoute()) return '— km';
     return km.toFixed(2).replace('.', ',') + ' km';
   }
-  function urgentWarnHtml() {
-    if (!state || state.speed !== 'urgent') return '';
-    var min = urgentMinOffer();
+  function offerWarnHtml() {
+    if (!state) return '';
+    if (state.speed === 'urgent') {
+      var urgentMin = urgentMinOffer();
+      if (offerAmount() >= urgentMin) return '';
+      return '<p class="order-offer__warn" data-offer-warn>Đơn GẤP cần mức tối đa từ ' + money(urgentMin) + ' trở lên (bằng giá khởi điểm gấp)</p>';
+    }
+    if (!String(state.offer || '')) return '';
+    var min = minAmount();
     if (offerAmount() >= min) return '';
-    return '<p class="order-offer__warn" data-urgent-warn>Đơn GẤP cần mức tối đa từ ' + money(min) + ' trở lên (bằng giá khởi điểm gấp)</p>';
+    return '<p class="order-offer__warn" data-offer-warn>Số tiền tối thiểu là ' + money(min) + '</p>';
   }
   function quoteLines() {
-    if (offerAmount() < MIN_OFFER) return '';
+    if (offerAmount() < minAmount()) return '';
     var q = currentQuote();
     var workerLine = q.workersFee
       ? '<li><span>Số thợ (×' + q.workers + ')</span><b>' + money(q.workersFee) + '</b></li>'
@@ -393,12 +473,12 @@ TTV.screens = TTV.screens || {};
       var pay = rootEl.querySelector('.order-pay');
       if (pay) pay.insertAdjacentHTML('beforebegin', html);
     }
-    syncUrgentWarn();
+    syncOfferWarn();
   }
-  function syncUrgentWarn() {
+  function syncOfferWarn() {
     if (!rootEl) return;
-    var html = urgentWarnHtml();
-    var el = rootEl.querySelector('[data-urgent-warn]');
+    var html = offerWarnHtml();
+    var el = rootEl.querySelector('[data-offer-warn]');
     if (el && html) { el.outerHTML = html; return; }
     if (el && !html) { el.remove(); return; }
     if (!html) return;
@@ -430,11 +510,11 @@ TTV.screens = TTV.screens || {};
           '<button type="button" class="order-add-stop" disabled>+ Thêm điểm trả (sắp có)</button>' +
         '</section>' +
         '<button type="button" class="order-card order-svc" data-action="change-service">' +
-          serviceIconHtml(sv) + '<span>Dịch vụ: <b>' + esc(sv.name) + '</b></span><em>Đổi</em></button>' +
+          serviceIconHtml(sv) + '<span class="order-svc__name">Dịch vụ: <b>' + esc(sv.name) + '</b></span><em>Đổi</em></button>' +
         '<h2 class="order-title">Chi tiết công việc</h2>' +
         '<section class="order-card">' +
           rowIcon('weight', 'Trọng lượng', '') +
-          '<div class="order-weights">' + WEIGHTS.map(function (w) {
+          '<div class="order-weights">' + weightList().map(function (w) {
             return '<button type="button" class="order-chip' + (w.id === state.weight ? ' is-selected' : '') + '" data-weight="' + w.id + '">' + esc(w.name) + '</button>';
           }).join('') + '</div>' +
           '<p class="order-hint">' + esc(weightHint()) + '</p>' +
@@ -468,10 +548,10 @@ TTV.screens = TTV.screens || {};
         '<h2 class="order-title">Số tiền bạn trả · ' + esc(SPEEDS.filter(function (s) { return s.id === state.speed; })[0].name) + '</h2>' +
         '<section class="order-card order-offer">' +
           '<div class="order-offer__top"><strong class="' + (state.offer ? '' : 'is-empty') + '">' + esc(offerText) + '</strong>' + ico('pencil') + '</div>' +
-          urgentWarnHtml() +
+          offerWarnHtml() +
           '<p class="order-hint">Bạn sẵn sàng trả bao nhiêu cho việc này?</p>' +
-          '<label class="order-amount"><input type="text" inputmode="numeric" data-offer placeholder="Tối thiểu 10.000" value="' + esc(state.offer || '') + '"><span>đ</span></label>' +
-          '<p class="order-hint">Bạn tự quyết mức giá · tối thiểu 10.000đ</p>' +
+          '<label class="order-amount"><input type="text" inputmode="numeric" data-offer placeholder="Tối thiểu ' + esc(TTV.Utils.money(minOfferNow(), { currency: false })) + '" value="' + esc(state.offer || '') + '"><span>đ</span></label>' +
+          '<p class="order-hint">Bạn tự quyết mức giá · tối thiểu ' + money(minAmount()) + '</p>' +
           quoteLines() +
           '<div class="order-pay">' +
             '<button type="button" class="order-pay__btn' + (state.pay === 'cash' ? ' is-selected' : '') + '" data-pay="cash">' + ico('cash') + ' Tiền mặt</button>' +
@@ -506,7 +586,7 @@ TTV.screens = TTV.screens || {};
       }
       syncSubmit();
       syncQuote();
-      syncUrgentWarn();
+      syncOfferWarn();
     });
     var noteInput = rootEl.querySelector('[data-note]');
     if (noteInput) noteInput.addEventListener('input', function () { state.note = noteInput.value; });
@@ -579,7 +659,7 @@ TTV.screens = TTV.screens || {};
     if (key === 'open-speed') { openSpeedSheet(); return; }
     if (key === 'submit-order') {
       if (!canSubmit()) return;
-      TTV.Components.toast('Xác nhận đặt đơn sẽ mở ở bước tiếp theo.', 'info');
+      openConfirmSheet();
       return;
     }
     if (key === 'remove-photo') {
@@ -593,7 +673,7 @@ TTV.screens = TTV.screens || {};
       return;
     }
     if (key === 'remove-video') { clearVideo(); paint(); return; }
-    if (key === 'speed-done') { closeSheet(); applyUrgentFloor(); paint(); }
+    if (key === 'speed-done') { closeSheet(); paint(); }
   }
 
   document.addEventListener('click', function (e) {
@@ -620,8 +700,10 @@ TTV.screens = TTV.screens || {};
     }
     if (e.target.closest('[data-action="speed-done"]')) {
       closeSheet();
-      applyUrgentFloor();
       paint();
+    }
+    if (e.target.closest('[data-action="confirm-place"]')) {
+      placeOrder();
     }
   });
 
@@ -651,16 +733,44 @@ TTV.screens = TTV.screens || {};
         note: draft.note || '',
         speed: draft.speed || 'default',
         provider: draft.provider || 'any',
-        offer: draft.offer || '',
+        offer: '',
         pay: draft.pay || 'cash',
         images: [],
         video: null
       };
       Promise.all([
         TTV.api.listServices(),
-        TTV.pricing && TTV.pricing.ready ? TTV.pricing.ready() : Promise.resolve()
+        TTV.pricing && TTV.pricing.ready ? TTV.pricing.ready() : Promise.resolve(),
+        query.reorder ? TTV.api.getOrder(query.reorder).catch(function () { return null; }) : Promise.resolve(null)
       ]).then(function (pack) {
         services = pack[0] || [];
+        var old = pack[2];
+        if (old && state) {
+          var pick = old.pickup || {}, drop = old.dropoff || {};
+          state.service = old.service || state.service;
+          state.pickup = pick.addr || '';
+          state.pickupLat = pick.lat != null ? pick.lat : null;
+          state.pickupLng = pick.lng != null ? pick.lng : null;
+          state.dropoff = drop.addr || '';
+          state.dropLat = drop.lat != null ? drop.lat : null;
+          state.dropLng = drop.lng != null ? drop.lng : null;
+          state.weight = old.weight_tier || state.weight;
+          state.pickupFloor = old.pickup_floor || 0;
+          state.pickupElevator = !!old.pickup_elevator;
+          state.needUnload = old.need_unload !== false;
+          state.dropFloor = old.drop_floor || 0;
+          state.dropElevator = !!old.drop_elevator;
+          state.workers = old.workers || 1;
+          state.note = old.note || '';
+          state.speed = old.speed || 'default';
+          state.provider = old.provider_type || 'any';
+          state.pay = old.pay_method === 'wallet' ? 'cash' : (old.pay_method || 'cash');
+        }
+        var tiers = weightList();
+        if (state && tiers.length) {
+          var ids = tiers.map(function (w) { return w.id; });
+          if (ids.indexOf(state.weight) < 0) state.weight = ids[0];
+        }
         paint();
       }).catch(function () {
         services = [];
@@ -669,6 +779,7 @@ TTV.screens = TTV.screens || {};
     },
     destroy: function () {
       persistDraft();
+      placing = false;
       closeSheet();
       if (TTV.ui.placePicker) TTV.ui.placePicker.close();
       if (state && state.images) state.images.forEach(revokePhoto);

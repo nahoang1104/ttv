@@ -56,7 +56,12 @@ TTV.ready = TTV.Store.ready().then(function () { return TTV.Seed.run(); }).then(
   TTV.Router.add('/notifications', stub('Thông báo', 'home'), { roles: ['CUSTOMER'], loginRoute: '/login', deniedRoute: '/login' });
   TTV.Router.add('/coupons', stub('Mã giảm giá', 'home'), { roles: ['CUSTOMER'], loginRoute: '/login', deniedRoute: '/login' });
   TTV.Router.add('/wallet', stub('Ví của tôi', 'wallet'), { roles: ['CUSTOMER'], loginRoute: '/login', deniedRoute: '/login' });
-  TTV.Router.add('/orders', stub('Đơn hàng', 'history'), { roles: ['CUSTOMER'], loginRoute: '/login', deniedRoute: '/login' });
+  TTV.Router.add('/orders/:id/quotes', function (ctx) {
+    TTV.screens.orderQuotes.render(document.getElementById('app'), ctx);
+  }, { roles: ['CUSTOMER'], loginRoute: '/login', deniedRoute: '/login', destroy: function () { TTV.screens.orderQuotes.destroy(); } });
+  TTV.Router.add('/orders', function () {
+    TTV.screens.orders.render(document.getElementById('app'));
+  }, { roles: ['CUSTOMER'], loginRoute: '/login', deniedRoute: '/login', destroy: function () { TTV.screens.orders.destroy(); } });
   TTV.Router.add('/profile', stub('Cá nhân', 'profile'), { roles: ['CUSTOMER'], loginRoute: '/login', deniedRoute: '/login' });
   TTV.Router.add('/address/new', function () {
     TTV.screens.addressForm.render(document.getElementById('app'));
