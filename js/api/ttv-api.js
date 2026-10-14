@@ -469,6 +469,99 @@ window.TTV = window.TTV || {};
     });
   };
 
+  // Xóa địa chỉ của chính khách đang đăng nhập (task 4.2).
+  api.deleteAddress = function (id) {
+    var s = customerSession();
+    if (!s) return Promise.reject(new Error('Hãy đăng nhập để xóa địa chỉ.'));
+    return store().get('addresses', id).then(function (row) {
+      if (!row || row.user_id !== s.account_id) throw new Error('Không tìm thấy địa chỉ.');
+      return store().remove('addresses', id);
+    }).then(function () { return true; });
+  };
+
+  /* ===== 7.4 Mã giảm giá (khách) ===== */
+  function couponExpired(c, now) {
+    var exp = c && c.expires_at ? new Date(c.expires_at).getTime() : NaN;
+    return !!c && (c.status === 'expired' || (isFinite(exp) && exp < now));
+  }
+  function couponView(c, status, extra) {
+    return Object.assign({
+      code: c.code, title: c.title || c.code, condition: c.condition || '',
+      min_workers: Number(c.min_workers) || 1, min_order: Number(c.min_order) || 0,
+      expires_at: c.expires_at || '', status: status
+    }, extra || {});
+  }
+
+  // Danh sách mã của khách: Khả dụng / Đã dùng / Hết hạn. Mã hết hạn của hệ thống luôn hiện ở tab Hết hạn (để demo).
+  api.listMyCoupons = function () {
+    var s = customerSession();
+    var empty = { available: [], used: [], expired: [] };
+    if (!s) return Promise.resolve(empty);
+    return Promise.all([store().list('coupons'), store().query('user_coupons', { user_id: s.account_id })]).then(function (p) {
+      var now = Date.now(), byCode = {}, owned = {}, out = { available: [], used: [], expired: [] };
+      (p[0] || []).forEach(function (c) { byCode[c.code] = c; });
+      (p[1] || []).forEach(function (u) { owned[u.coupon_code] = u; });
+      Object.keys(owned).forEach(function (code) {
+        var c = byCode[code], u = owned[code];
+        if (!c) return;
+        if (u.status === 'used') out.used.push(couponView(c, 'used', { used_order_id: u.used_order_id || '' }));
+        else if (couponExpired(c, now)) out.expired.push(couponView(c, 'expired'));
+        else out.available.push(couponView(c, 'available'));
+      });
+      Object.keys(byCode).forEach(function (code) {
+        if (!owned[code] && couponExpired(byCode[code], now)) out.expired.push(couponView(byCode[code], 'expired'));
+      });
+      out.available.sort(function (a, b) { return String(a.expires_at).localeCompare(String(b.expires_at)); });
+      out.expired.sort(function (a, b) { return String(b.expires_at).localeCompare(String(a.expires_at)); });
+      return out;
+    });
+  };
+
+  // Nhập mã → thêm vào danh sách Khả dụng. Từ chối: trống, không tồn tại, hết hạn, đã nhận.
+  api.claimCoupon = function (rawCode) {
+    var s = customerSession();
+    if (!s) return Promise.reject(fail('UNAUTH', 'Hãy đăng nhập để nhập mã giảm giá.'));
+    var code = String(rawCode || '').trim().toUpperCase();
+    if (!code) return Promise.reject(fail('VALIDATION', 'Hãy nhập mã giảm giá.'));
+    return Promise.all([store().get('coupons', code), store().get('user_coupons', s.account_id + ':' + code)]).then(function (p) {
+      var c = p[0], u = p[1];
+      if (!c || c.status === 'inactive') throw fail('NOT_FOUND', 'Mã giảm giá không tồn tại.');
+      if (couponExpired(c, Date.now())) throw fail('EXPIRED', 'Mã giảm giá đã hết hạn.');
+      if (u) throw fail('CONFLICT', u.status === 'used' ? 'Bạn đã dùng mã này rồi.' : 'Bạn đã nhận mã này rồi.');
+      var row = { id: s.account_id + ':' + code, user_id: s.account_id, coupon_code: code, status: 'available', used_order_id: '', created_at: new Date().toISOString() };
+      return store().put('user_coupons', row).then(function () { return c; });
+    });
+  };
+
+  // Kiểm mã cho một đơn: phải là mã khách đang có (chưa dùng), còn hạn, đơn ≥ 2 thợ, đủ đơn tối thiểu. Trả { ok, discount, final, reason }.
+  api.checkCouponForOrder = function (code, opts) {
+    opts = opts || {};
+    var s = customerSession();
+    if (!s) return Promise.reject(fail('UNAUTH', 'Hãy đăng nhập.'));
+    code = String(code || '').trim().toUpperCase();
+    return Promise.all([store().get('coupons', code), store().get('user_coupons', s.account_id + ':' + code)]).then(function (p) {
+      var c = p[0], u = p[1];
+      if (c && (!u || u.status !== 'available')) return { ok: false, discount: 0, final: Number(opts.amount) || 0, reason: u ? 'Bạn đã dùng mã này rồi.' : 'Bạn chưa nhận mã này.' };
+      return TTV.pricing.ready().then(function () { return TTV.pricing.applyCoupon(opts.amount, c, opts.workers); });
+    });
+  };
+
+  // Đánh dấu mã đã dùng cho đơn (gọi khi chọn thợ).
+  function markCouponUsed(userId, code, orderId) {
+    return store().get('user_coupons', userId + ':' + code).then(function (u) {
+      if (!u || u.status === 'used') return null;
+      return store().put('user_coupons', Object.assign({}, u, { status: 'used', used_order_id: String(orderId), used_at: new Date().toISOString() }));
+    });
+  }
+  // Giảm giá áp lên giá báo giá được chọn (đơn có coupon_id và ≥ 2 thợ); không hợp lệ thì không giảm.
+  function couponForChoice(o, price) {
+    if (!o || !o.coupon_id) return Promise.resolve(null);
+    return Promise.all([store().get('coupons', String(o.coupon_id)), TTV.pricing.ready()]).then(function (p) {
+      var r = TTV.pricing.applyCoupon(price, p[0], o.workers);
+      return r.ok && r.discount > 0 ? r : null;
+    }).catch(function () { return null; });
+  }
+
   /* ===== 3.3 Tạo tài khoản thợ (admin) ===== */
   // Loại nhà cung cấp và giới hạn số thợ theo loại (cá nhân luôn là 1 thợ).
   api.VENDOR_TYPES = [{ value: 'personal', label: 'Cá nhân' }, { value: 'team', label: 'Tổ đội' }, { value: 'company', label: 'Công ty' }];
@@ -1541,14 +1634,17 @@ window.TTV = window.TTV || {};
       if (o.status !== 'finding') throw fail('CONFLICT', 'Đơn đã được ghép thợ.');
       if (!q || String(q.order_id) !== oid) throw fail('QUOTE_NOT_FOUND', 'Không tìm thấy báo giá này.');
       if (q.status !== 'pending') throw fail('QUOTE_GONE', 'Thợ vừa rút hoặc sửa báo giá. Hãy xem lại danh sách.');
-      return TTV.Store.get('vendors', q.vendor_id).then(function (v) {
+      return Promise.all([TTV.Store.get('vendors', q.vendor_id), couponForChoice(o, Number(q.price) || 0)]).then(function (pv) {
+        var v = pv[0], cp = pv[1];
         if (!v || (v.status || 'active') === 'locked') throw fail('QUOTE_GONE', 'Thợ này hiện không nhận đơn được. Hãy chọn thợ khác.');
-        var price = Number(q.price) || 0, now = new Date().toISOString();
+        var quoted = Number(q.price) || 0, price = cp ? cp.final : quoted, now = new Date().toISOString(); // final_price đã trừ mã giảm giá (7.4)
         var tl = (Array.isArray(o.timeline) ? o.timeline : []).concat([{ event: 'matched', at: now }]);
         // Đơn ví: hoàn phần chênh lệch user_offer − final_price sẽ nối ở task 7.3 (hiện đơn mới chỉ trả tiền mặt).
-        var next = Object.assign({}, o, { status: 'matched', vendor_id: String(q.vendor_id), accepted_quote_id: qid, final_price: price, matched_at: now, timeline: tl });
+        var next = Object.assign({}, o, { status: 'matched', vendor_id: String(q.vendor_id), accepted_quote_id: qid, final_price: price, matched_at: now, timeline: tl, coupon_discount: cp ? cp.discount : 0, price_breakdown: Object.assign({}, o.price_breakdown || {}, { discount: cp ? cp.discount : 0 }) });
         var ev = { id: TTV.Utils.id(), order_id: oid, event: 'matched', actor_type: 'customer', actor_id: s.account_id, note: 'Chọn ' + (v.name || q.vendor_id) + ' · ' + price, created_at: now };
         return TTV.Store.put('orders', next).then(function () {
+          return cp ? markCouponUsed(s.account_id, String(o.coupon_id), oid) : null;
+        }).then(function () {
           return TTV.Store.put('quotes', Object.assign({}, q, { status: 'accepted', updated_at: now }));
         }).then(function () {
           return closePendingQuotes(oid, 'rejected', now, qid);

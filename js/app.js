@@ -54,7 +54,9 @@ TTV.ready = TTV.Store.ready().then(function () { return TTV.Seed.run(); }).then(
   }, { roles: ['CUSTOMER'], loginRoute: '/login', deniedRoute: '/login', destroy: function () { TTV.screens.createOrder.destroy(); } });
 
   TTV.Router.add('/notifications', stub('Thông báo', 'home'), { roles: ['CUSTOMER'], loginRoute: '/login', deniedRoute: '/login' });
-  TTV.Router.add('/coupons', stub('Mã giảm giá', 'home'), { roles: ['CUSTOMER'], loginRoute: '/login', deniedRoute: '/login' });
+  TTV.Router.add('/coupons', function () {
+    TTV.screens.coupons.render(document.getElementById('app'));
+  }, { roles: ['CUSTOMER'], loginRoute: '/login', deniedRoute: '/login', destroy: function () { TTV.screens.coupons.destroy(); } });
   TTV.Router.add('/wallet', stub('Ví của tôi', 'wallet'), { roles: ['CUSTOMER'], loginRoute: '/login', deniedRoute: '/login' });
   TTV.Router.add('/orders/:id/quotes', function (ctx) {
     TTV.screens.orderQuotes.render(document.getElementById('app'), ctx);
@@ -63,8 +65,14 @@ TTV.ready = TTV.Store.ready().then(function () { return TTV.Seed.run(); }).then(
     TTV.screens.orders.render(document.getElementById('app'));
   }, { roles: ['CUSTOMER'], loginRoute: '/login', deniedRoute: '/login', destroy: function () { TTV.screens.orders.destroy(); } });
   TTV.Router.add('/profile', stub('Cá nhân', 'profile'), { roles: ['CUSTOMER'], loginRoute: '/login', deniedRoute: '/login' });
-  TTV.Router.add('/address/new', function () {
-    TTV.screens.addressForm.render(document.getElementById('app'));
+  TTV.Router.add('/address', function () {
+    TTV.screens.addressBook.render(document.getElementById('app'));
+  }, { roles: ['CUSTOMER'], loginRoute: '/login', deniedRoute: '/login', destroy: function () { TTV.screens.addressBook.destroy(); } });
+  TTV.Router.add('/address/new', function (ctx) {
+    TTV.screens.addressForm.render(document.getElementById('app'), ctx);
+  }, { roles: ['CUSTOMER'], loginRoute: '/login', deniedRoute: '/login', destroy: function () { TTV.screens.addressForm.destroy(); } });
+  TTV.Router.add('/address/edit/:id', function (ctx) {
+    TTV.screens.addressForm.render(document.getElementById('app'), ctx);
   }, { roles: ['CUSTOMER'], loginRoute: '/login', deniedRoute: '/login', destroy: function () { TTV.screens.addressForm.destroy(); } });
   TTV.Router.add('/', function () {
     var session = TTV.auth && typeof TTV.auth.getSession === 'function' ? TTV.auth.getSession() : null;

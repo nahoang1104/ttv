@@ -11,8 +11,11 @@ TTV.screens = TTV.screens || {};
   ];
   var state = null;
   var rootEl = null;
+  var backAfter = false; // mở từ modal chọn địa điểm (?back=1) → lưu xong quay lại màn trước
+  var token = 0;
 
   function esc(v) { return TTV.Components.escape(v); }
+  function t(key, vars) { return TTV.I18n.t(key, vars); }
 
   function typeIcon(id) {
     var map = {
@@ -32,10 +35,12 @@ TTV.screens = TTV.screens || {};
 
   function markup() {
     var n = (state.detail || '').length;
-    return TTV.Components.header('Thêm địa chỉ', { back: true }) +
+    var title = t(state.id ? 'address.form.editTitle' : 'address.form.addTitle');
+    if (state.loading) return TTV.Components.header(title, { back: true }) + '<main class="addr-page">' + TTV.Components.loading(t('common.loading')) + '</main>';
+    return TTV.Components.header(title, { back: true }) +
       '<main class="addr-page">' +
         '<button type="button" class="addr-map-btn" data-action="pick-map">' +
-          '<span class="addr-map-btn__pin" aria-hidden="true"></span> Chọn Trên Bản Đồ</button>' +
+          '<span class="addr-map-btn__pin" aria-hidden="true"></span> Chọn trên bản đồ</button>' +
         '<label class="addr-field">Tên gợi nhớ' +
           '<input type="text" data-field="label" maxlength="80" placeholder="VD: Nhà, Văn phòng" value="' + esc(state.label) + '">' +
         '</label>' +
@@ -131,6 +136,7 @@ TTV.screens = TTV.screens || {};
       state.saving = true;
       action.disabled = true;
       TTV.api.saveAddress({
+        id: state.id || undefined,
         label: state.label,
         type: state.type,
         detail: state.detail,
@@ -140,9 +146,9 @@ TTV.screens = TTV.screens || {};
         contact_phone: state.contact_phone,
         is_default: state.is_default
       }).then(function () {
-        TTV.Components.toast('Đã lưu địa chỉ.', 'success');
-        if (history.length > 1) history.back();
-        else TTV.Router.navigate('/home');
+        TTV.Components.toast(t('address.saved'), 'success');
+        if (backAfter && history.length > 1) history.back();
+        else TTV.Router.navigate('/address', { replace: true }); // về Sổ địa chỉ
       }).catch(function (err) {
         state.saving = false;
         syncSave();
@@ -151,24 +157,52 @@ TTV.screens = TTV.screens || {};
     }
   }
 
+  function blank() {
+    return { id: null, label: '', detail: '', lat: null, lng: null, contact_name: '', contact_phone: '', type: 'home', is_default: false, saving: false, loading: false };
+  }
+
   TTV.screens.addressForm = {
-    render: function (container) {
+    TYPES: TYPES,
+    typeIcon: typeIcon,
+    // ctx.params.id có → chế độ Sửa (#/address/edit/:id); không có → Thêm (#/address/new)
+    render: function (container, ctx) {
+      var my = ++token;
+      var id = ctx && ctx.params && ctx.params.id;
+      backAfter = !!(ctx && ctx.query && ctx.query.back === '1');
       rootEl = container;
-      state = {
-        label: '',
-        detail: '',
-        lat: null,
-        lng: null,
-        contact_name: '',
-        contact_phone: '',
-        type: 'home',
-        is_default: false,
-        saving: false
-      };
+      state = blank();
+      if (id) {
+        state.id = id;
+        state.loading = true;
+        paint();
+        TTV.api.getAddress(id).then(function (row) {
+          if (my !== token || !state) return;
+          if (!row) {
+            TTV.Components.toast(t('address.notFound'), 'danger');
+            TTV.Router.navigate('/address', { replace: true });
+            return;
+          }
+          state.loading = false;
+          state.label = row.label || '';
+          state.detail = row.detail || '';
+          state.lat = row.lat;
+          state.lng = row.lng;
+          state.contact_name = row.contact_name || '';
+          state.contact_phone = row.contact_phone || '';
+          state.type = row.type || 'other';
+          state.is_default = !!row.is_default;
+          paint();
+        }).catch(function () {
+          if (my !== token || !state) return;
+          TTV.Components.toast(t('address.loadError'), 'danger');
+          TTV.Router.navigate('/address', { replace: true });
+        });
+        return;
+      }
       paint();
       if (TTV.api.getCurrentUser) {
         TTV.api.getCurrentUser().then(function (user) {
-          if (!user || !state) return;
+          if (!user || !state || my !== token) return;
           if (!state.contact_name && user.name) state.contact_name = user.name;
           if (!state.contact_phone && user.phone) state.contact_phone = user.phone;
           var nameEl = rootEl && rootEl.querySelector('[data-field="contact_name"]');
@@ -180,6 +214,7 @@ TTV.screens = TTV.screens || {};
       }
     },
     destroy: function () {
+      token++;
       if (TTV.ui.placePicker) TTV.ui.placePicker.close();
       rootEl = null;
       state = null;

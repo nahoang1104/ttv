@@ -1009,3 +1009,69 @@ button.vendor-stat:active{background:#f3f8fe}
 .qc-call{margin-top:12px}
 .quotes-dlg__yes--ok{background:var(--grad-button)}
 .quotes-dlg__err{margin:-6px 0 12px;color:var(--c-danger);font-size:13px}
+
+/* ===== 4.2 Sổ địa chỉ ===== */
+.ab{min-height:100%;display:flex;flex-direction:column;background:#fbfdff}
+.ab-page{flex:1;padding:14px 18px 20px;overflow:auto}
+.ab-desc{margin:0 0 12px;font-size:14px;color:#9aa3b2}
+.ab-search{display:flex;align-items:center;gap:10px;height:50px;padding:0 14px;margin-bottom:16px;border:1px solid #e7edf4;border-radius:14px;background:#fff;color:#9aa3b2}
+.ab-search:focus-within{border-color:#1b7be4;box-shadow:0 0 0 3px #1b7be41f}
+.ab-search input{flex:1;min-width:0;border:0;outline:0;background:transparent;font:inherit;font-size:15px;color:#14213d}
+.ab-search input::placeholder{color:#b4becb}
+.ab-card{margin-bottom:14px;padding:16px;border-radius:18px;background:#fff;box-shadow:0 2px 12px rgba(20,33,61,.07)}
+.ab-card__top{display:flex;gap:12px}
+.ab-card__ico{width:48px;height:48px;flex-shrink:0;display:grid;place-items:center;border-radius:14px;background:#f1f3f7;color:#6b7686}
+.ab-card__ico svg{width:24px;height:24px}
+.ab-card__body{flex:1;min-width:0}
+.ab-card__title{display:flex;align-items:center;flex-wrap:wrap;gap:6px}
+.ab-card__title strong{font-size:16px;font-weight:800;color:#14213d;word-break:break-word}
+.ab-tag{padding:3px 9px;border-radius:7px;background:#eff1f5;color:#6b7686;font-size:12px;font-weight:700}
+.ab-default{padding:3px 9px;border-radius:7px;background:linear-gradient(90deg,#0b4aa8,#1b9bf0);color:#fff;font-size:12px;font-weight:700}
+.ab-card__addr{margin:8px 0 6px;font-size:14px;line-height:1.5;color:#4a5568;word-break:break-word}
+.ab-card__who{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:13px;color:#9aa3b2}
+.ab-card__who span{display:inline-flex;align-items:center;gap:5px}
+.ab-card__acts{display:flex;gap:12px;margin-top:14px;padding-top:14px;border-top:1px solid #eef1f5}
+.ab-act{flex:1;min-height:44px;display:inline-flex;align-items:center;justify-content:center;gap:6px;border:0;border-radius:12px;font-size:15px;font-weight:800;cursor:pointer}
+.ab-act--edit{background:#eaf3ff;color:#1b7be4}
+.ab-act--del{background:#fdeaea;color:#d93636}
+.ab-empty{display:flex;flex-direction:column;align-items:center;margin-top:72px;text-align:center}
+.ab-empty__icon{width:88px;height:88px;display:grid;place-items:center;border-radius:50%;background:#eaf3ff;color:#1b9bf0}
+.ab-empty h3{margin:16px 0 4px;font-size:16px;font-weight:600;color:#8b97a8}
+.ab-empty p{margin:0;font-size:13px;color:#b0b8c4}
+.ab-retry{display:block;margin:16px auto 0}
+.ab-del-msg{margin:0;font-size:15px;line-height:1.5;color:#4a5568}
+.ab-modal .modal__footer{display:flex;gap:10px}
+.ab-modal .modal__footer .btn{flex:1}
+.ab-del-ok{background:#d93636;border-color:#d93636}
+
+/* ===== 7.4 Mã giảm giá ===== */
+.cp{min-height:100%;background:#fbfdff}
+.cp-page{padding:16px 18px 28px}
+.cp-enter{padding:16px;border-radius:20px;background:#fff;box-shadow:0 2px 14px rgba(20,33,61,.07)}
+.cp-enter label{display:block;margin-bottom:10px;font-size:15px;font-weight:800;color:#14213d}
+.cp-enter__row{display:flex;gap:10px}
+.cp-enter__row input{flex:1;min-width:0;height:48px;padding:0 14px;border:1px solid #e7edf4;border-radius:14px;background:#fff;font:inherit;font-size:16px;font-weight:600;letter-spacing:.02em;color:#14213d;outline:0}
+.cp-enter__row input::placeholder{color:#b4becb;font-weight:500;letter-spacing:0}
+.cp-enter__row input:focus{border-color:#1b7be4;box-shadow:0 0 0 3px #1b7be41f}
+.cp-apply{flex-shrink:0;min-width:96px;height:48px;border-radius:14px}
+.cp-page .notice{margin:14px 0 4px}
+.cp-tabs{display:flex;margin:10px 0 14px;border-bottom:1px solid #e7edf4}
+.cp-tab{flex:1;padding:12px 4px;border:0;border-bottom:2.5px solid transparent;margin-bottom:-1px;background:transparent;font:inherit;font-size:15px;font-weight:800;color:#9aa3b2;cursor:pointer}
+.cp-tab.is-on{color:#1b7be4;border-bottom-color:#1b9bf0}
+.cp-card{display:flex;margin-bottom:12px;border-radius:18px;background:#fff;box-shadow:0 2px 12px rgba(20,33,61,.07);overflow:hidden}
+.cp-card__ico{width:78px;flex-shrink:0;display:grid;place-items:center;background:#eaf4ff;color:#1b7be4;border-right:2px dashed #cfe3fa}
+.cp-card__body{flex:1;min-width:0;padding:14px 14px 12px}
+.cp-card__body h3{margin:0 0 4px;font-size:16px;font-weight:800;color:#14213d;word-break:break-word}
+.cp-card__body p{margin:0;font-size:14px;color:#6b7686}
+.cp-card__body .cp-card__hint{margin-top:2px;font-size:12px;color:#9aa3b2}
+.cp-card__foot{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:10px}
+.cp-card__date{display:inline-flex;align-items:center;gap:5px;font-size:13px;color:#9aa3b2}
+.cp-tag{padding:6px 12px;border-radius:9px;background:#eaf4ff;color:#1b7be4;font-size:13px;font-weight:800;letter-spacing:.02em}
+.cp-tag--off{background:#eceff3;color:#aab2bf;letter-spacing:0}
+.cp-card--used,.cp-card--expired{background:#f7f8f9;box-shadow:none}
+.cp-card--used .cp-card__ico,.cp-card--expired .cp-card__ico{background:#f1f3f5;color:#b4bcc7;border-right-color:#dfe3e8}
+.cp-card--used h3,.cp-card--expired h3{color:#8b95a3}
+.cp-empty{display:flex;flex-direction:column;align-items:center;margin-top:44px;text-align:center}
+.cp-empty h3{margin:20px 0 6px;font-size:17px;font-weight:800;color:#14213d}
+.cp-empty p{max-width:260px;margin:0;font-size:14px;line-height:1.5;color:#8b97a8}
+.cp-retry{display:block;margin:16px auto 0}

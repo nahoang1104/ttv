@@ -22,7 +22,7 @@ TTV.ui = TTV.ui || {};
 
   function goAdd() {
     close();
-    TTV.Router.navigate('/address/new');
+    TTV.Router.navigate('/address/new?back=1');
   }
 
   function titleText() {

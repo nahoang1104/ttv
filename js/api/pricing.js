@@ -58,6 +58,29 @@ window.TTV = window.TTV || {};
     };
   }
 
+  // Tính giảm giá của mã (task 7.4). Chỉ áp dụng khi số thợ ≥ min_workers (mặc định 2) và số tiền ≥ min_order.
+  // Giảm không làm số tiền xuống dưới mức tối thiểu (min_amount). Trả { ok, discount, final, reason }.
+  function applyCoupon(amount, coupon, workers, now) {
+    var a = Math.max(0, Math.round(num(amount)));
+    var out = { ok: false, discount: 0, final: a, reason: '' };
+    if (!coupon) { out.reason = 'Mã giảm giá không tồn tại.'; return out; }
+    var exp = coupon.expires_at ? new Date(coupon.expires_at).getTime() : NaN;
+    var t = now == null ? Date.now() : (now instanceof Date ? now.getTime() : Number(now));
+    if (coupon.status === 'expired' || (isFinite(exp) && exp < t)) { out.reason = 'Mã giảm giá đã hết hạn.'; return out; }
+    var minW = Math.max(1, Math.round(num(coupon.min_workers, 2)));
+    if (Math.max(1, Math.round(num(workers, 1))) < minW) { out.reason = 'Mã chỉ áp dụng cho đơn từ ' + minW + ' thợ trở lên.'; return out; }
+    var minOrder = Math.max(0, Math.round(num(coupon.min_order)));
+    if (a < minOrder) { out.reason = 'Đơn tối thiểu ' + new Intl.NumberFormat('vi-VN').format(minOrder) + 'đ để dùng mã này.'; return out; }
+    var value = Math.max(0, num(coupon.discount_value));
+    var d = coupon.discount_type === 'fixed' ? value : Math.floor(a * value / 100);
+    var cap = Math.max(0, Math.round(num(coupon.max_discount)));
+    if (cap > 0) d = Math.min(d, cap);
+    var floorAmount = Math.max(0, Math.round(num(cfg && cfg.min_amount)));
+    d = Math.max(0, Math.min(Math.round(d), a - Math.min(a, floorAmount)));
+    out.ok = true; out.discount = d; out.final = a - d;
+    return out;
+  }
+
   TTV.pricing = {
     ready: function () {
       if (!TTV.Store || !TTV.Store.get) return Promise.resolve(cfg || {});
@@ -71,6 +94,7 @@ window.TTV = window.TTV || {};
     },
     invalidate: function () { cfg = null; },
     quote: quote,
+    applyCoupon: applyCoupon,
     weightTiers: function () {
       return ((cfg && cfg.weight_tiers) || []).map(function (w) {
         return { id: w.id || w.code, name: w.name || '', hint: w.description || '', price: w.price };
