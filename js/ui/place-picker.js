@@ -132,8 +132,10 @@ TTV.ui = TTV.ui || {};
       return;
     }
     box.innerHTML = rows.map(function (row) {
+      var role = row.default_for || '';
+      var tag = role === 'pickup' ? ' · Mặc định bốc' : (role === 'dropoff' ? ' · Mặc định trả' : '');
       return '<button type="button" class="place-picker__addr" data-place-id="' + esc(row.id) + '">' +
-        '<strong>' + esc(row.label || 'Địa chỉ') + '</strong>' +
+        '<strong>' + esc(row.label || 'Địa chỉ') + esc(tag) + '</strong>' +
         '<small>' + esc(row.detail || '') + '</small></button>';
     }).join('');
   }

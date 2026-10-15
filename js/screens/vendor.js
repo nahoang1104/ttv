@@ -14,6 +14,8 @@ TTV.screens = TTV.screens || {};
   var currentView = '';   // 'home' | 'market' | 'jobs' | 'profile' (để nút Thử lại vẽ lại đúng màn)
   var currentCtx = null;
   var pages = {};
+  var stopLive = null;
+  var stopUnread = null;
 
   function t(key, params) { return TTV.I18n.t(key, params); }
   function esc(v) { return C.escape(v); }
@@ -31,7 +33,8 @@ TTV.screens = TTV.screens || {};
     user: svg('<circle cx="12" cy="8" r="3.4"/><path d="M5.5 19.5c.8-3.4 3.4-5 6.5-5s5.7 1.6 6.5 5"/>'),
     lock: svg('<rect x="5" y="10.5" width="14" height="9.5" rx="2"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/>'),
     logout: svg('<path d="M10 5H6.5A1.5 1.5 0 0 0 5 6.5v11A1.5 1.5 0 0 0 6.5 19H10"/><path d="M14 8l4 4-4 4M18 12H9.5"/>'),
-    chevron: svg('<path d="m9.5 6 6 6-6 6"/>')
+    chevron: svg('<path d="m9.5 6 6 6-6 6"/>'),
+    bell: svg('<path d="M6.5 16.5v-5a5.5 5.5 0 0 1 11 0v5l1.4 1.5H5.1z"/><path d="M10 20.5a2.2 2.2 0 0 0 4 0"/>')
   };
 
   /* ---------- Khung dùng chung ---------- */
@@ -71,7 +74,14 @@ TTV.screens = TTV.screens || {};
       ? '★ ' + Number(v.rating).toFixed(1) + ' · ' + t('vendor.jobsDone', { n: Number(v.jobs_done) || 0 })
       : t('vendor.rating.none'));
     if (opts.phone && v.phone) chips.push(TTV.Utils.maskPhone(v.phone));
-    return '<header class="vendor-hero' + (opts.flat ? ' vendor-hero--flat' : '') + '"><div class="vendor-hero__row">' +
+    var unread = TTV.NotiLive ? TTV.NotiLive.unread() : 0;
+    return '<header class="vendor-hero' + (opts.flat ? ' vendor-hero--flat' : '') + '">' +
+      '<div class="vendor-hero__top">' +
+        '<button type="button" class="vendor-hero__bell" data-route="/vendor/notifications" aria-label="' + esc(t('vendor.notifications')) + '">' +
+          ICONS.bell + TTV.Utils.unreadBadge(unread) +
+        '</button>' +
+      '</div>' +
+      '<div class="vendor-hero__row">' +
       C.avatar(v.name, v.avatar_path, { size: 'lg' }) +
       '<div class="vendor-hero__text">' +
         (opts.greeting ? '<p class="vendor-hero__greet">' + esc(t(greetingKey())) + '</p>' : '') +
@@ -106,8 +116,8 @@ TTV.screens = TTV.screens || {};
       '</section>' +
       (blocked ? C.notice(t('vendor.ready.blocked', { limit: vnd(Math.abs(d.readiness.limit)) }), t('vendor.ready.blockedTitle')) : '');
   }
-  function statTile(label, value, route) {
-    var inner = '<b>' + esc(value) + '</b><span>' + esc(label) + '</span>';
+  function statTile(label, value, route, key) {
+    var inner = '<b' + (key ? ' data-vendor-stat="' + key + '"' : '') + '>' + esc(value) + '</b><span>' + esc(label) + '</span>';
     return route
       ? '<button type="button" class="vendor-stat" data-route="' + esc(route) + '">' + inner + '</button>'
       : '<div class="vendor-stat">' + inner + '</div>';
@@ -123,8 +133,8 @@ TTV.screens = TTV.screens || {};
       '</div>' +
       '<div class="vendor-section"><h2>' + esc(t('vendor.home.ongoing')) + '</h2></div>' +
       '<div class="vendor-stats">' +
-        statTile(t('vendor.stat.quotes'), String(d.ongoing.pendingQuotes)) +
-        statTile(t('vendor.stat.jobs'), String(d.ongoing.activeJobs), '/vendor/jobs') +
+        statTile(t('vendor.stat.quotes'), String(d.ongoing.pendingQuotes), '', 'quotes') +
+        statTile(t('vendor.stat.jobs'), String(d.ongoing.activeJobs), '/vendor/jobs', 'jobs') +
       '</div>' +
       '<div class="vendor-cta"><button type="button" class="btn btn-primary btn-block" data-route="/vendor/market">' + esc(t('vendor.home.cta')) + '</button></div>' +
       tabBar('home') +
@@ -140,6 +150,18 @@ TTV.screens = TTV.screens || {};
       root.innerHTML = homeMarkup(d);
       bindAvatarFallback(root, d.vendor.name);
       bindCommon();
+      stopUnread = TTV.Utils.watchUnread(root);
+      if (TTV.Live && TTV.Live.watch) {
+        stopLive = TTV.Live.watch('orders', function () {
+          TTV.api.getVendorDashboard().then(function (next) {
+            if (currentView !== 'home') return;
+            var q = root.querySelector('[data-vendor-stat="quotes"]');
+            var j = root.querySelector('[data-vendor-stat="jobs"]');
+            if (q) q.textContent = String(next.ongoing.pendingQuotes);
+            if (j) j.textContent = String(next.ongoing.activeJobs);
+          }).catch(function () {});
+        }, { immediate: false });
+      }
     }).catch(function (err) {
       if (my !== token) return;
       if (handleAuthLoss(err)) return;
@@ -187,6 +209,7 @@ TTV.screens = TTV.screens || {};
   /* ---------- Tab Cá nhân ---------- */
   var MENU = [
     { title: 'vendor.profile.section.activity', items: [
+      { icon: 'bell', label: 'vendor.notifications', route: '/vendor/notifications' },
       { icon: 'quote', label: 'vendor.profile.quotes', route: '/vendor/quotes' },
       { icon: 'wallet', label: 'vendor.profile.wallet', route: '/vendor/wallet' },
       { icon: 'withdraw', label: 'vendor.profile.withdraw', route: '/vendor/withdrawals' },
@@ -225,6 +248,7 @@ TTV.screens = TTV.screens || {};
       root.innerHTML = profileMarkup(v);
       bindAvatarFallback(root, v.name);
       bindCommon();
+      stopUnread = TTV.Utils.watchUnread(root);
     }).catch(function (err) {
       if (my !== token) return;
       if (handleAuthLoss(err)) return;
@@ -268,6 +292,8 @@ TTV.screens = TTV.screens || {};
   }
   function destroyAll() {
     token++; // vô hiệu mọi callback đang chờ
+    if (stopLive) { stopLive(); stopLive = null; }
+    if (stopUnread) { stopUnread(); stopUnread = null; }
     if (docHandler) { document.removeEventListener('click', docHandler); docHandler = null; }
     if (activePage && typeof activePage.destroy === 'function') { try { activePage.destroy(); } catch (_) {} }
     activePage = null;
@@ -282,6 +308,12 @@ TTV.screens = TTV.screens || {};
 
   var opts = { roles: ['VENDOR'], loginRoute: '/staff-login', deniedRoute: '/staff-login', destroy: destroyAll };
   TTV.Router.add('/vendor', renderHome, opts);
+  TTV.Router.add('/vendor/notifications', function () {
+    destroyAll();
+    TTV.screens.notifications.render(app());
+  }, { roles: ['VENDOR'], loginRoute: '/staff-login', deniedRoute: '/staff-login', destroy: function () {
+    TTV.screens.notifications.destroy();
+  } });
   TTV.Router.add('/vendor/market', function (ctx) { renderTab('market', ctx); }, opts);
   TTV.Router.add('/vendor/jobs', function (ctx) { renderTab('jobs', ctx); }, opts);
   TTV.Router.add('/vendor/profile', renderProfile, opts);

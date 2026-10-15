@@ -16,8 +16,11 @@ TTV.screens = TTV.screens || {};
   ];
   var SERVICE_IMG = {
     moving: 'uploads/img-giaodien/chuyennha.png',
+    warehouse: 'uploads/img-giaodien/bocxepkho1.png',
     furniture: 'uploads/img-giaodien/noithat.png',
     office: 'uploads/img-giaodien/vanphong.png',
+    construction: 'uploads/img-giaodien/congtrinh.png',
+    hourly: 'uploads/img-giaodien/theogio.png',
     goods: 'uploads/img-giaodien/bocvachanghoa.png'
   };
 
@@ -206,11 +209,6 @@ TTV.screens = TTV.screens || {};
         file: file
       };
       state.images.push(item);
-      if (TTV.ui.orderMedia && TTV.ui.orderMedia.uploadImage) {
-        TTV.ui.orderMedia.uploadImage(file).then(function (saved) {
-          if (saved && photoById(item.id)) item.path = saved.path;
-        }).catch(function () {});
-      }
     });
     paint();
   }
@@ -248,7 +246,9 @@ TTV.screens = TTV.screens || {};
       }
       img.addEventListener('error', fail);
       if (img.complete) {
-        if (!img.naturalWidth) fail();
+        if (img.naturalWidth) return;
+        if (item.previewUrl && String(item.previewUrl).indexOf('blob:') === 0) return;
+        fail();
         return;
       }
       item.loadTimer = setTimeout(fail, PHOTO_LOAD_MS);
@@ -262,9 +262,8 @@ TTV.screens = TTV.screens || {};
   }
 
   function serviceIconHtml(sv) {
-    var src = SERVICE_IMG[sv.code || sv.id];
-    if (src) return '<img class="order-svc__img" src="' + esc(src) + '" alt="">';
-    return '<span class="order-svc__emoji">' + esc(sv.icon || '📦') + '</span>';
+    var src = SERVICE_IMG[sv.code || sv.id] || SERVICE_IMG.goods;
+    return '<img class="order-svc__img" src="' + esc(src) + '" alt="">';
   }
 
   function closeSheet() {
@@ -381,32 +380,33 @@ TTV.screens = TTV.screens || {};
     });
     if (state.video) media.push({ kind: 'video', path: state.video.path || '', duration: state.video.duration, file: state.video.file || null });
     TTV.api.createOrder({
-      service: state.service,
-      pickup: { addr: state.pickup, lat: state.pickupLat, lng: state.pickupLng },
-      dropoff: { addr: state.dropoff, lat: state.dropLat, lng: state.dropLng },
-      distance_km: distanceKm(),
-      weight: state.weight,
-      pickup_floor: state.pickupFloor,
-      pickup_elevator: state.pickupElevator,
-      need_unload: state.needUnload,
-      drop_floor: state.dropFloor,
-      drop_elevator: state.dropElevator,
-      workers: state.workers,
-      note: state.note,
-      speed: state.speed,
-      provider_type: state.provider,
-      user_offer: offerAmount(),
-      pay_method: 'cash',
-      media: media
-    }).then(function (order) {
+        service: state.service,
+        pickup: { addr: state.pickup, lat: state.pickupLat, lng: state.pickupLng },
+        dropoff: { addr: state.dropoff, lat: state.dropLat, lng: state.dropLng },
+        distance_km: distanceKm(),
+        weight: state.weight,
+        pickup_floor: state.pickupFloor,
+        pickup_elevator: state.pickupElevator,
+        need_unload: state.needUnload,
+        drop_floor: state.dropFloor,
+        drop_elevator: state.dropElevator,
+        workers: state.workers,
+        note: state.note,
+        speed: state.speed,
+        provider_type: state.provider,
+        user_offer: offerAmount(),
+        pay_method: 'cash',
+        media: media
+      }).then(function (order) {
       placing = false;
       closeSheet();
       try { sessionStorage.removeItem(DRAFT_KEY); } catch (_) {}
       TTV.Components.toast('Đơn hàng đã được tạo!', 'success');
-      TTV.Router.navigate('/orders/' + order.id + '/quotes');
+      if (TTV.Router.markAfterPlace) TTV.Router.markAfterPlace(order.id);
+      TTV.Router.navigate('/orders/' + order.id + '/quotes', { replace: true });
     }).catch(function (err) {
       placing = false;
-      if (btn) { btn.disabled = false; btn.textContent = 'Đặt đơn'; }
+      if (btn) { btn.disabled = false; btn.textContent = 'Thanh toán ' + moneyVnd(offerAmount()); }
       TTV.Components.toast((err && err.message) || 'Không đặt được đơn.', 'danger');
     });
   }
@@ -741,7 +741,8 @@ TTV.screens = TTV.screens || {};
       Promise.all([
         TTV.api.listServices(),
         TTV.pricing && TTV.pricing.ready ? TTV.pricing.ready() : Promise.resolve(),
-        query.reorder ? TTV.api.getOrder(query.reorder).catch(function () { return null; }) : Promise.resolve(null)
+        query.reorder ? TTV.api.getOrder(query.reorder).catch(function () { return null; }) : Promise.resolve(null),
+        TTV.api.listAddresses ? TTV.api.listAddresses() : Promise.resolve([])
       ]).then(function (pack) {
         services = pack[0] || [];
         var old = pack[2];
@@ -765,6 +766,20 @@ TTV.screens = TTV.screens || {};
           state.speed = old.speed || 'default';
           state.provider = old.provider_type || 'any';
           state.pay = old.pay_method === 'wallet' ? 'cash' : (old.pay_method || 'cash');
+        } else if (state) {
+          var addrs = pack[3] || [];
+          var pickDef = addrs.filter(function (a) { return a.default_for === 'pickup'; })[0];
+          var dropDef = addrs.filter(function (a) { return a.default_for === 'dropoff'; })[0];
+          if (pickDef && pickDef.detail) {
+            state.pickup = pickDef.detail;
+            state.pickupLat = pickDef.lat != null ? Number(pickDef.lat) : null;
+            state.pickupLng = pickDef.lng != null ? Number(pickDef.lng) : null;
+          }
+          if (!pasted && dropDef && dropDef.detail) {
+            state.dropoff = dropDef.detail;
+            state.dropLat = dropDef.lat != null ? Number(dropDef.lat) : null;
+            state.dropLng = dropDef.lng != null ? Number(dropDef.lng) : null;
+          }
         }
         var tiers = weightList();
         if (state && tiers.length) {

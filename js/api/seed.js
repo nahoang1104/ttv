@@ -2,7 +2,7 @@
 window.TTV = window.TTV || {};
 (function (TTV) {
   'use strict';
-  var SEED_VERSION = '2026-10-v7';
+  var SEED_VERSION = '2026-10-v8';
   var services = [
     {id:'moving',code:'moving',name:'Chuyển nhà',desc:'Chuyển nhà trọn gói, có thợ + xe',icon:'🏠',base_price:50000,unit:'lượt'},
     {id:'warehouse',code:'warehouse',name:'Bốc xếp kho',desc:'Bốc/dỡ hàng kho, tính theo khối',icon:'📦',base_price:100000,unit:'khối'},
@@ -40,9 +40,9 @@ window.TTV = window.TTV || {};
     {id:'refund',type:'refund',title:'Chính sách hoàn tiền',content:'Các khoản giữ và hoàn tiền chỉ mô phỏng luồng nghiệp vụ; không phát sinh giao dịch thanh toán thật.',updated_at:'2026-10-09T00:00:00.000Z'}
   ];
   var banners = [
-    {id:'banner-welcome',title:'Ưu đãi Hội viên',subtitle:'Tiết kiệm đến 20% mọi đơn bốc vác',type:'member',target:'coupon',image_path:'',sort:1,active:true},
-    {id:'banner-coupon',title:'Ưu đãi khách mới',subtitle:'Nhập mã TTVNEW10',type:'promo',target:'coupon',image_path:'',sort:2,active:true},
-    {id:'banner-explore',title:'Dịch vụ an tâm',subtitle:'Đội ngũ thợ sẵn sàng hỗ trợ',type:'explore',target:'none',image_path:'',sort:3,active:true}
+    {id:'banner-welcome',title:'Ưu đãi Hội viên',subtitle:'Tiết kiệm đến 20% mọi đơn bốc vác',type:'member',target:'coupon',image_path:'uploads/img-giaodien/uudaihoivien.png',sort:1,active:true},
+    {id:'banner-coupon',title:'Ưu đãi khách mới',subtitle:'Nhập mã TTVNEW10',type:'promo',target:'coupon',image_path:'uploads/img-giaodien/chuyennhabaner.png',sort:2,active:true},
+    {id:'banner-explore',title:'Dịch vụ an tâm',subtitle:'Đội ngũ thợ sẵn sàng hỗ trợ',type:'explore',target:'none',image_path:'uploads/img-giaodien/bocxepkhochuyennghiep.png',sort:3,active:true}
   ];
   var settings = [
     {id:'commission_default',key:'commission_default',value:15},
@@ -70,9 +70,11 @@ window.TTV = window.TTV || {};
       return store.get('__meta', 'seed_version').then(function (meta) {
         if (meta && meta.value === SEED_VERSION && !options.force) return {seeded:false,reason:'already-seeded',version:SEED_VERSION};
         if (meta && meta.value && meta.value !== SEED_VERSION && !options.force) {
-          return store.get('banners', 'banner-welcome').then(function (row) {
-            var next = (!row || row.title === 'Chào mừng đến TingTingVac') ? store.put('banners', banners[0]) : Promise.resolve();
-            return next.then(function () { return store.get('pricing_config', 'default'); }).then(function (pc) {
+          return Promise.all(banners.map(function (b) {
+            return store.get('banners', b.id).then(function (cur) {
+              return store.put('banners', cur ? Object.assign({}, cur, { image_path: b.image_path }) : b);
+            });
+          })).then(function () { return store.get('pricing_config', 'default'); }).then(function (pc) {
               if (!pc) return store.put('pricing_config', pricing[0]);
               var base = pricing[0];
               var merged = Object.assign({}, base, pc);
@@ -84,7 +86,6 @@ window.TTV = window.TTV || {};
                 return {seeded:false,reason:'migrated',version:SEED_VERSION,from:meta.value};
               });
             });
-          });
         }
         var plan = [
           ['services',services],['pricing_config',pricing],['vendors',vendors],['coupons',coupons],

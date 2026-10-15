@@ -9,6 +9,10 @@ TTV.screens = TTV.screens || {};
   var boxEl = null, clickHandler = null;
   var sort = 'newest';    // giữ lựa chọn sắp xếp khi quay lại từ chi tiết đơn
   var data = null;        // kết quả api.listMarketOrders gần nhất
+  var unwatch = null;
+  var listSig = '';
+  var loading = false;
+  var pendingSilent = false;
 
   function t(key, params) { return TTV.I18n.t(key, params); }
   function esc(v) { return C.escape(v); }
@@ -83,13 +87,30 @@ TTV.screens = TTV.screens || {};
         : C.emptyState(t('vendorMarket.empty.title'), t('vendorMarket.empty.desc'), { icon: '▤' }));
   }
 
+  function marketSig(res) {
+    var r = (res && res.readiness) || {};
+    var orders = (res && res.orders) || [];
+    return [r.ready ? '1' : '0', r.blocked ? '1' : '0'].join(':') + '|' + orders.map(function (o) {
+      return o.id + ':' + ((o.my_quote && o.my_quote.status) || '') + ':' + o.offer;
+    }).join('|');
+  }
   function load(silent) {
+    if (loading) { pendingSilent = true; return; }
     var my = ++token;
+    loading = true;
     if (!silent && boxEl) boxEl.innerHTML = C.loading(t('common.loading'));
     TTV.api.listMarketOrders({ sort: sort }).then(function (res) {
+      loading = false;
       if (my !== token || !boxEl) return;
-      data = res; paint();
+      var nextSig = marketSig(res);
+      if (!(silent && nextSig === listSig && data)) {
+        listSig = nextSig;
+        data = res;
+        paint();
+      }
+      if (pendingSilent) { pendingSilent = false; load(true); }
     }).catch(function (err) {
+      loading = false;
       if (my !== token || !boxEl) return;
       if (err && (err.code === 'LOCKED' || err.code === 'NOT_FOUND' || err.code === 'FORBIDDEN')) {
         TTV.api.logoutAndGo().then(function () { C.toast(t('vendor.locked'), 'danger'); });
@@ -117,9 +138,16 @@ TTV.screens = TTV.screens || {};
     clickHandler = onClick;
     box.addEventListener('click', clickHandler);
     load(false);
+    if (TTV.Live && TTV.Live.watch) {
+      unwatch = TTV.Live.watch('orders', function () { load(true); }, { immediate: false });
+    }
   }
   function destroy() {
     token++;
+    loading = false;
+    pendingSilent = false;
+    listSig = '';
+    if (unwatch) { unwatch(); unwatch = null; }
     if (boxEl && clickHandler) boxEl.removeEventListener('click', clickHandler);
     boxEl = null; clickHandler = null;
   }

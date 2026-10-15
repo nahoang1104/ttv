@@ -7,6 +7,7 @@ TTV.screens = TTV.screens || {};
   'use strict';
   var rootEl = null;
   var order = null;
+  var orderId = '';
   var tickTimer = null;
   var pollTimer = null;
   var polling = false;
@@ -20,7 +21,8 @@ TTV.screens = TTV.screens || {};
   function t(key, params) { return TTV.I18n.t(key, params); }
   function money(n) { return TTV.Utils.money(n); }
   function quotesHeader() {
-    return '<header class="app-header"><button type="button" class="app-header__back" data-route="/orders" aria-label="Quay lại">‹</button><h1>' + esc(t('quotes.title')) + '</h1></header>';
+    var oid = (order && order.id) || orderId || '';
+    return '<header class="app-header"><button type="button" class="app-header__back" data-back data-after-place="' + esc(oid) + '" data-back-fallback="/orders" aria-label="Quay lại">‹</button><h1>' + esc(t('quotes.title')) + '</h1></header>';
   }
   function pinSvg(kind) {
     var cls = kind === 'drop' ? 'quotes-pin quotes-pin--drop' : 'quotes-pin quotes-pin--pick';
@@ -314,6 +316,7 @@ TTV.screens = TTV.screens || {};
       expiring = false; choosing = false; polling = false; quotes = []; quotesSig = '';
       rootEl.addEventListener('click', onPickClick);
       var id = ctx && ctx.params && ctx.params.id;
+      orderId = id || '';
       rootEl.classList.add('is-order');
       rootEl.innerHTML = quotesHeader() +
         '<main class="page">' + TTV.Components.loading(t('common.loading')) + '</main>';
@@ -338,6 +341,7 @@ TTV.screens = TTV.screens || {};
       if (rootEl) { rootEl.classList.remove('is-order'); rootEl.removeEventListener('click', onPickClick); }
       rootEl = null;
       order = null;
+      orderId = '';
       quotes = [];
       expiring = false; choosing = false; polling = false;
     }

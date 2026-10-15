@@ -85,6 +85,7 @@ window.TTV = window.TTV || {};
 
   /* ===================== #/profile ===================== */
   var docHandler = null;
+  var stopUnread = null;
 
   function menuRow(item) {
     var ready = TTV.Router.has(item.route);
@@ -100,7 +101,7 @@ window.TTV = window.TTV || {};
     return '<div class="profile">' +
       '<header class="profile-hero">' +
         '<div class="profile-hero__actions">' +
-          '<button type="button" class="profile-hero__btn" data-route="/notifications" aria-label="' + esc(t('profile.menu.notifications')) + '">' + ICONS.bell + (unread > 0 ? '<span class="profile-hero__dot"></span>' : '') + '</button>' +
+          '<button type="button" class="profile-hero__btn" data-route="/notifications" aria-label="' + esc(t('profile.menu.notifications') + (unread > 0 ? ' (' + unread + ')' : '')) + '">' + ICONS.bell + TTV.Utils.unreadBadge(unread) + '</button>' +
           '<button type="button" class="profile-hero__btn" data-menu-route="/settings" aria-label="' + esc(t('profile.menu.settings')) + '">' + ICONS.gear + '</button>' +
         '</div>' +
         '<div class="profile-hero__user">' +
@@ -134,11 +135,13 @@ window.TTV = window.TTV || {};
     destroyProfile();
     var root = app();
     root.innerHTML = C.loading(t('common.loading'));
-    Promise.all([TTV.api.getCurrentUser(), TTV.api.getProfileStats(), TTV.api.unreadNotificationCount()]).then(function (parts) {
+    Promise.all([TTV.api.getCurrentUser(), TTV.api.getProfileStats()]).then(function (parts) {
       var user = parts[0];
       if (!user) { TTV.api.logoutAndGo(); return; } // phiên trỏ tới tài khoản không còn
-      root.innerHTML = profileMarkup(user, parts[1] || { completed: 0, processing: 0 }, parts[2] || 0);
+      root.innerHTML = profileMarkup(user, parts[1] || { completed: 0, processing: 0 }, TTV.NotiLive ? TTV.NotiLive.unread() : 0);
       bindAvatarFallback(root, user.name);
+      if (stopUnread) stopUnread();
+      stopUnread = TTV.Utils.watchUnread(root);
       docHandler = function (e) {
         var row = e.target.closest('[data-menu-route]');
         if (row && root.contains(row)) {
@@ -158,6 +161,7 @@ window.TTV = window.TTV || {};
     });
   }
   function destroyProfile() {
+    if (stopUnread) { stopUnread(); stopUnread = null; }
     if (docHandler) { document.removeEventListener('click', docHandler); docHandler = null; }
     var m = document.querySelector('.modal-backdrop'); if (m) m.remove();
   }
@@ -245,8 +249,9 @@ window.TTV = window.TTV || {};
       busy = true; submit.disabled = true; submit.querySelector('span').textContent = t('profile.saving'); showError('');
       var upload = pendingFile ? TTV.Upload.upload(pendingFile, { ownerId: user.id, kind: 'avatar' }).then(function (r) { return r.path; }) : Promise.resolve(undefined);
       upload.catch(function (e2) {
-        var msg = e2 && e2.name === 'AbortError' ? t('profile.error.pickerCancelled') : t('profile.error.avatarSave', { reason: (e2 && e2.message) || '' });
-        var wrapped = new Error(msg); wrapped.code = 'UPLOAD'; throw wrapped;
+        var wrapped = new Error(t('profile.error.avatarSave', { reason: (e2 && e2.message) || '' }));
+        wrapped.code = 'UPLOAD';
+        throw wrapped;
       }).then(function (path) {
         return TTV.api.updateProfile({ name: name.value, email: email.value, gender: gender.value, dob: dob.value, avatar_path: path });
       }).then(function () {
