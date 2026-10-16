@@ -48,8 +48,9 @@ TTV.screens = TTV.screens || {};
     boxEl.innerHTML = '<div class="vm-meta"><span>' + esc(t('vendorJobs.count', { n: jobs.length })) + '</span></div>' +
       '<div class="vm-list">' + jobs.map(cardMarkup).join('') + '</div>';
   }
-  function load(silent) {
+  function load(silent, retriesLeft) {
     if (loading) { pendingSilent = true; return; }
+    retriesLeft = retriesLeft == null ? 0 : retriesLeft;
     var my = ++token;
     loading = true;
     if (!silent && boxEl) boxEl.innerHTML = C.loading(t('common.loading'));
@@ -58,6 +59,10 @@ TTV.screens = TTV.screens || {};
       if (my !== token || !boxEl) return;
       var next = (res && res.jobs) || [];
       var nextSig = jobsSig(next);
+      if (silent && retriesLeft > 0 && nextSig === listSig) {
+        setTimeout(function () { if (token === my && boxEl) load(true, retriesLeft - 1); }, 400);
+        return;
+      }
       if (!(silent && nextSig === listSig)) {
         listSig = nextSig;
         jobs = next;
@@ -67,7 +72,7 @@ TTV.screens = TTV.screens || {};
     }).catch(function (err) {
       loading = false;
       if (my !== token || !boxEl) return;
-      if (err && (err.code === 'LOCKED' || err.code === 'NOT_FOUND' || err.code === 'FORBIDDEN')) {
+      if (err && err.code === 'LOCKED') {
         TTV.api.logoutAndGo().then(function () { C.toast(t('vendor.locked'), 'danger'); });
         return;
       }
@@ -86,7 +91,7 @@ TTV.screens = TTV.screens || {};
     box.addEventListener('click', clickHandler);
     load(false);
     if (TTV.Live && TTV.Live.watch) {
-      unwatch = TTV.Live.watch('orders', function () { load(true); }, { immediate: false });
+      unwatch = TTV.Live.watch('orders', function (fromPoll) { load(true, fromPoll ? 0 : 4); }, { immediate: false });
     }
   }
   function destroy() {

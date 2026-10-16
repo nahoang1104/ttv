@@ -229,7 +229,9 @@ window.TTV = window.TTV || {};
     // Tạm hiện nội dung trong bottom sheet (giữ nguyên dữ liệu đang nhập); màn #/policies làm ở task 9.5.
     TTV.api.getPolicy(type).then(function (p) {
       var title = p ? p.title : (type === 'terms' ? 'Điều khoản sử dụng' : 'Chính sách bảo mật');
-      var body = p ? '<p>' + esc(p.content) + '</p><p class="muted">Cập nhật lần cuối: ' + esc(TTV.Utils.date(p.updated_at)) + '</p>' : '<p class="muted">Chưa có nội dung.</p>';
+      var body = TTV.screens.policies && TTV.screens.policies.bodyHtml
+        ? '<div class="pol-card pol-card--sheet">' + TTV.screens.policies.bodyHtml(p) + '</div>'
+        : (p ? '<p>' + esc(p.content) + '</p>' : '<p class="muted">Chưa có nội dung.</p>');
       document.body.insertAdjacentHTML('beforeend', C.sheet(title, body, { footer: '<button type="button" class="btn btn-primary" data-sheet-close>Đã hiểu</button>' }));
     });
   }

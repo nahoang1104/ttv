@@ -44,7 +44,7 @@ window.TTV = window.TTV || {};
       { icon: 'star', label: 'profile.menu.reviews', route: '/reviews' }
     ] },
     { title: 'profile.section.support', items: [
-      { icon: 'bell', label: 'profile.menu.notifications', route: '/notifications' },
+      { icon: 'bell', label: 'profile.menu.notifications', route: '/settings/notifications' },
       { icon: 'shield', label: 'profile.menu.security', route: '/security' },
       { icon: 'alert', label: 'profile.menu.reports', route: '/reports' },
       { icon: 'help', label: 'profile.menu.help', route: '/help' },

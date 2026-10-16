@@ -59,7 +59,7 @@ TTV.screens = TTV.screens || {};
   }
   // Tài khoản bị khóa / bị xóa giữa chừng → đăng xuất về trang đăng nhập.
   function handleAuthLoss(err) {
-    if (err && (err.code === 'LOCKED' || err.code === 'NOT_FOUND' || err.code === 'FORBIDDEN')) {
+    if (err && err.code === 'LOCKED') {
       TTV.api.logoutAndGo().then(function () { C.toast(t('vendor.locked'), 'danger'); });
       return true;
     }
@@ -122,10 +122,41 @@ TTV.screens = TTV.screens || {};
       ? '<button type="button" class="vendor-stat" data-route="' + esc(route) + '">' + inner + '</button>'
       : '<div class="vendor-stat">' + inner + '</div>';
   }
+  function crewHint(crew) {
+    if (!crew) return '';
+    if (crew.status === 'full') return t('vendor.crew.hint.full');
+    if (crew.status === 'partial') return t('vendor.crew.hint.partial', { n: crew.free });
+    return t('vendor.crew.hint.idle', { n: crew.size });
+  }
+  function crewMarkup(crew) {
+    if (!crew) return '';
+    var pct = crew.size ? Math.round(100 * crew.busy / crew.size) : 0;
+    return '<section class="vendor-crew" id="vendor-crew" data-status="' + esc(crew.status) + '">' +
+      '<div class="vendor-crew__head">' +
+        '<strong>' + esc(t('vendor.crew.title.' + crew.kind)) + '</strong>' +
+        '<span class="vendor-crew__badge">' + esc(t('vendor.crew.status.' + crew.status)) + '</span>' +
+      '</div>' +
+      '<div class="vendor-crew__bar" aria-hidden="true"><i style="width:' + pct + '%"></i></div>' +
+      '<div class="vendor-crew__nums">' +
+        '<div><b>' + esc(String(crew.size)) + '</b><span>' + esc(t('vendor.crew.size')) + '</span></div>' +
+        '<div><b>' + esc(String(crew.busy)) + '</b><span>' + esc(t('vendor.crew.busy')) + '</span></div>' +
+        '<div><b>' + esc(String(crew.free)) + '</b><span>' + esc(t('vendor.crew.free')) + '</span></div>' +
+      '</div>' +
+      '<p class="vendor-crew__hint">' + esc(crewHint(crew)) + '</p>' +
+    '</section>';
+  }
+  function paintCrew(crew) {
+    var box = document.getElementById('vendor-crew');
+    if (!box) return;
+    var wrap = document.createElement('div');
+    wrap.innerHTML = crewMarkup(crew);
+    if (wrap.firstChild) box.replaceWith(wrap.firstChild);
+  }
   function homeMarkup(d) {
     return '<div class="vendor vendor-home">' +
       heroMarkup(d.vendor, { greeting: true }) +
       readyMarkup(d) +
+      crewMarkup(d.crew) +
       '<div class="vendor-section"><h2>' + esc(t('vendor.home.today')) + '</h2><span>' + esc(TTV.Utils.date(d.today.date)) + '</span></div>' +
       '<div class="vendor-stats">' +
         statTile(t('vendor.stat.completed'), String(d.today.completed)) +
@@ -159,6 +190,7 @@ TTV.screens = TTV.screens || {};
             var j = root.querySelector('[data-vendor-stat="jobs"]');
             if (q) q.textContent = String(next.ongoing.pendingQuotes);
             if (j) j.textContent = String(next.ongoing.activeJobs);
+            if (next.crew) paintCrew(next.crew);
           }).catch(function () {});
         }, { immediate: false });
       }
@@ -198,10 +230,16 @@ TTV.screens = TTV.screens || {};
     currentView = id; currentCtx = ctx || null;
     ++token;
     var root = app();
-    root.innerHTML = '<div class="vendor">' + C.header(t('vendor.tab.' + id), { back: false }) +
+    var unread = TTV.NotiLive ? TTV.NotiLive.unread() : 0;
+    root.innerHTML = '<div class="vendor">' +
+      '<header class="app-header"><h1>' + esc(t('vendor.tab.' + id)) + '</h1>' +
+        '<button type="button" class="app-header__action vendor-hero__bell" data-route="/vendor/notifications" aria-label="' + esc(t('vendor.notifications')) + '">' +
+          ICONS.bell + TTV.Utils.unreadBadge(unread) +
+        '</button></header>' +
       '<main class="vendor-main" id="vendor-page"></main>' + tabBar(id) + '</div>';
     var box = root.querySelector('#vendor-page'), page = pages[id];
     bindCommon();
+    stopUnread = TTV.Utils.watchUnread(root);
     if (page && typeof page.render === 'function') { activePage = page; page.render(box, ctx); }
     else box.innerHTML = C.emptyState(t('vendor.' + id + '.soon'), t('vendor.' + id + '.soon.desc'), { icon: id === 'market' ? '▤' : '☑' });
   }

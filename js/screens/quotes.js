@@ -1,6 +1,7 @@
 /* Màn Đang nhận báo giá (khách) — 4.9 (khung) + 5.6 (danh sách báo giá).
    Báo giá của mọi thợ/tổ đội/công ty (đơn 1 thợ lẫn ≥ 2 thợ) xếp thấp → cao; khách tự chọn; tự cập nhật mỗi 4 giây.
-   Tự hủy khi hết quote_window_min. Đơn đã ghép thì hiện thợ được chọn. */
+   Tự hủy khi hết quote_window_min. Đơn đã ghép thì hiện thợ được chọn.
+   Làm mới: Live ping (tab thợ gửi báo giá) + poll 4 giây từ cache; ping mới xóa cache KIO. */
 window.TTV = window.TTV || {};
 TTV.screens = TTV.screens || {};
 (function (TTV) {
@@ -10,7 +11,9 @@ TTV.screens = TTV.screens || {};
   var orderId = '';
   var tickTimer = null;
   var pollTimer = null;
+  var unwatch = null;
   var polling = false;
+  var pendingRefresh = false;
   var choosing = false;
   var quotes = [];
   var quotesSig = '';
@@ -20,9 +23,9 @@ TTV.screens = TTV.screens || {};
   function esc(v) { return TTV.Components.escape(v); }
   function t(key, params) { return TTV.I18n.t(key, params); }
   function money(n) { return TTV.Utils.money(n); }
-  function quotesHeader() {
+  function quotesHeader(titleKey) {
     var oid = (order && order.id) || orderId || '';
-    return '<header class="app-header"><button type="button" class="app-header__back" data-back data-after-place="' + esc(oid) + '" data-back-fallback="/orders" aria-label="Quay lại">‹</button><h1>' + esc(t('quotes.title')) + '</h1></header>';
+    return '<header class="app-header"><button type="button" class="app-header__back" data-back data-after-place="' + esc(oid) + '" data-back-fallback="/orders" aria-label="Quay lại">‹</button><h1>' + esc(t(titleKey || 'quotes.title')) + '</h1></header>';
   }
   function pinSvg(kind) {
     var cls = kind === 'drop' ? 'quotes-pin quotes-pin--drop' : 'quotes-pin quotes-pin--pick';
@@ -214,12 +217,23 @@ TTV.screens = TTV.screens || {};
     });
   }
 
-  /* ----- Tự cập nhật (4 giây) ----- */
-  function stopPoll() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
-  function startPoll() { stopPoll(); pollTimer = setInterval(function () { refresh(false); }, POLL_MS); }
+  /* ----- Tự cập nhật: Live bus; nếu không có Live thì poll 4 giây ----- */
+  function stopPoll() {
+    if (unwatch) { unwatch(); unwatch = null; }
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  }
+  function startPoll() {
+    stopPoll();
+    if (TTV.Live && TTV.Live.watch) {
+      unwatch = TTV.Live.watch('orders', function () { refresh(false); }, { immediate: false });
+      return;
+    }
+    pollTimer = setInterval(function () { refresh(false); }, POLL_MS);
+  }
   // force = true: vẽ lại dù danh sách không đổi (sau khi chọn thợ)
   function refresh(force) {
-    if (!rootEl || !order || polling || choosing || expiring) return Promise.resolve();
+    if (!rootEl || !order || choosing || expiring) return Promise.resolve();
+    if (polling) { pendingRefresh = true; return Promise.resolve(); }
     var id = order.id;
     polling = true;
     return TTV.api.listOrderQuotes(id).then(function (res) {
@@ -235,31 +249,43 @@ TTV.screens = TTV.screens || {};
       if (order.status !== 'finding') { stopPoll(); stopTick(); quotes = res.quotes; paintMatched(); return; }
       var sig = signature(res.quotes);
       if (force || sig !== quotesSig) { quotes = res.quotes; quotesSig = sig; paintList(); }
-    }).catch(function () { polling = false; }); // lỗi tạm thời: bỏ qua, lần sau thử lại
+      if (pendingRefresh) { pendingRefresh = false; return refresh(false); }
+    }).catch(function () {
+      polling = false;
+      if (pendingRefresh) { pendingRefresh = false; return refresh(false); }
+    });
   }
 
   /* ----- Đơn đã ghép thợ ----- */
+  function successCheck() {
+    return '<span class="qc-success__icon" aria-hidden="true">' +
+      '<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" fill="#fff"/><path d="M7.5 12.4 10.4 15.2 16.5 8.8" stroke="#16a34a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>';
+  }
   function paintMatched() {
     if (!rootEl || !order) return;
     var q = quotes[0], v = q && q.vendor;
+    var name = (v && v.name) || '';
     var tel = v ? String(v.phone || '').replace(/[^\d+]/g, '') : '';
+    var desc = name ? t('quotes.matched.desc', { name: name }) : t('quotes.matched.desc.anon');
     rootEl.classList.add('is-order');
-    rootEl.innerHTML = quotesHeader() +
-      '<main class="quotes-page">' +
-        '<section class="order-card qc-matched"><span class="qc-matched__icon" aria-hidden="true">✓</span>' +
-          '<h3>' + esc(t('quotes.matched.title')) + '</h3><p>' + esc(t('quotes.matched.desc')) + '</p>' +
-          '<p class="quotes-code">' + esc(TTV.Utils.orderCode(order.id)) + '</p></section>' +
-        (q ? '<section class="order-card">' +
+    rootEl.innerHTML = quotesHeader('quotes.matched.header') +
+      '<main class="quotes-page quotes-page--matched">' +
+        '<section class="qc-success" role="status">' + successCheck() +
+          '<h3>' + esc(t('quotes.matched.title')) + '</h3>' +
+          '<p>' + esc(desc) + '</p>' +
+          '<p class="qc-success__code">' + esc(TTV.Utils.orderCode(order.id)) + '</p></section>' +
+        (q ? '<section class="order-card qc-picked">' +
+          '<p class="qc-picked__label">' + esc(t('quotes.matched.picked')) + '</p>' +
           '<article class="qc-card qc-card--plain"><header class="qc-head">' + TTV.Components.avatar(v.name || '?', v.avatar_path, { size: 'md' }) +
             '<div class="qc-who"><b>' + esc(v.name || t('quotes.vendor.unknown')) + '</b><span>' + esc(typeText(v)) + '</span></div>' +
             '<div class="qc-price"><b>' + money(order.final_price != null ? order.final_price : q.price) + '</b><small>' + esc(t('quotes.total')) + '</small></div></header>' +
           '<p class="qc-meta">' + vendorMeta(q) + '</p>' +
           '<p class="qc-meta qc-meta--eta">' + esc(t('quotes.eta', { n: q.eta_min })) + '</p>' +
           (q.message ? '<p class="qc-msg">“' + esc(q.message) + '”</p>' : '') +
-          (tel ? '<a class="btn btn-secondary btn-block qc-call" href="tel:' + esc(tel) + '">' + esc(t('quotes.call', { phone: v.phone })) + '</a>' : '') +
+          (tel ? '<a class="btn btn-primary btn-block qc-call" href="tel:' + esc(tel) + '">' + esc(t('quotes.call', { phone: v.phone })) + '</a>' : '') +
           '</article></section>' : '') +
       '</main>' +
-      '<div class="quotes-bar"><button type="button" class="btn btn-primary btn-block" data-route="/orders">' + esc(t('quotes.matched.cta')) + '</button></div>';
+      '<div class="quotes-bar"><button type="button" class="btn btn-secondary btn-block" data-route="/orders">' + esc(t('quotes.matched.cta')) + '</button></div>';
     bindList();
   }
 
@@ -313,7 +339,7 @@ TTV.screens = TTV.screens || {};
     render: function (container, ctx) {
       this.destroy();
       rootEl = container;
-      expiring = false; choosing = false; polling = false; quotes = []; quotesSig = '';
+      expiring = false; choosing = false; polling = false; pendingRefresh = false; quotes = []; quotesSig = '';
       rootEl.addEventListener('click', onPickClick);
       var id = ctx && ctx.params && ctx.params.id;
       orderId = id || '';
@@ -343,7 +369,7 @@ TTV.screens = TTV.screens || {};
       order = null;
       orderId = '';
       quotes = [];
-      expiring = false; choosing = false; polling = false;
+      expiring = false; choosing = false; polling = false; pendingRefresh = false;
     }
   };
 })(window.TTV);

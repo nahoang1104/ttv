@@ -16,8 +16,8 @@ Không mở trực tiếp bằng `file://` (upload và IndexedDB cần http).
 
 ## Driver dữ liệu
 
-- Mặc định: **local** (IndexedDB, không đụng KIO).
-- Thêm `?driver=kio` để dùng KIO (`https://kio.dvqt.vn`), bảng prefix `ttv_` — chưa bật, sẽ làm ở task 1.5.
+- Mặc định: **KIO** (`https://kio.dvqt.vn`), bảng `ttv_` + tên chữ thường không dấu (`ttv_orders`, `ttv_users`, `ttv_meta`…).
+- Thêm `?driver=local` để dùng IndexedDB trên máy.
 
 ## Tài khoản đầu tiên
 

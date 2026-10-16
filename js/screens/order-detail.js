@@ -21,6 +21,11 @@ TTV.screens = TTV.screens || {};
   var services = {};
   var mapObj = null;
   var mapGen = 0;
+  var unwatch = null;
+  var loading = false;
+  var pendingSilent = false;
+  var orderSig = '';
+  var orderId = '';
 
   function esc(v) { return TTV.Components.escape(v); }
   function t(key, vars) { return TTV.I18n.t(key, vars); }
@@ -40,9 +45,6 @@ TTV.screens = TTV.screens || {};
   function kmOne(n) {
     var x = Math.round((Number(n) || 0) * 10) / 10;
     return x.toFixed(1) + ' km';
-  }
-  function kmPay(n) {
-    return (Number(n) || 0).toFixed(3) + ' km';
   }
   function createdStamp(iso) {
     var d = new Date(iso);
@@ -156,22 +158,42 @@ TTV.screens = TTV.screens || {};
     }).join('');
   }
 
+  function photoGrid(list) {
+    if (!list.length) return '';
+    return '<div class="od-photos">' + list.map(function (m) {
+      return '<button type="button" class="od-photo" data-od-zoom="' + esc(m.path) + '"><img src="' + esc(m.path) + '" alt=""></button>';
+    }).join('') + '</div>';
+  }
+  function videoList(list) {
+    return list.map(function (m) {
+      return '<div class="od-video-wrap"><video class="od-video" controls preload="metadata" playsinline src="' + esc(m.path) + '"></video></div>';
+    }).join('');
+  }
+  function mediaCard(tone, title, hint, imgs, vids) {
+    if (!imgs.length && !vids.length) return '';
+    var n = imgs.length + vids.length;
+    var icon = tone === 'proof'
+      ? '<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.8"/><path d="m8.2 12.2 2.5 2.5 5.2-5.4" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+      : '<svg viewBox="0 0 24 24" fill="none"><path d="M4.6 8.2h3.1l1.3-2h6l1.3 2h3.1v9.8H4.6z" stroke="currentColor" stroke-width="1.7"/><circle cx="12" cy="13.1" r="2.8" stroke="currentColor" stroke-width="1.7"/></svg>';
+    var body = '';
+    if (imgs.length) body += photoGrid(imgs);
+    if (vids.length) body += videoList(vids);
+    return '<section class="od-media od-media--' + tone + '">' +
+      '<header class="od-media__head">' +
+        '<span class="od-media__icon" aria-hidden="true">' + icon + '</span>' +
+        '<div><h2>' + esc(title) + '</h2>' + (hint ? '<p>' + esc(hint) + '</p>' : '') + '</div>' +
+        '<span class="od-media__count">' + n + '</span></header>' +
+      body + '</section>';
+  }
   function photosHtml() {
-    var imgs = media.filter(function (m) { return m.kind === 'image'; });
-    var vids = media.filter(function (m) { return m.kind === 'video'; });
-    var html = '';
-    if (imgs.length) {
-      html += '<h2 class="od-h">' + esc(t('od.photos', { n: imgs.length })) + '</h2>' +
-        '<div class="od-photos">' + imgs.map(function (m) {
-          return '<button type="button" class="od-photo" data-od-zoom="' + esc(m.path) + '"><img src="' + esc(m.path) + '" alt=""></button>';
-        }).join('') + '</div>';
-    }
-    if (vids.length) {
-      html += '<h2 class="od-h">' + esc(t('od.video')) + '</h2>' + vids.map(function (m) {
-        return '<video class="od-video" controls preload="metadata" src="' + esc(m.path) + '"></video>';
-      }).join('');
-    }
-    return html;
+    var job = (media || []).filter(function (m) { return m.role !== 'proof'; });
+    var proofMedia = (media || []).filter(function (m) { return m.role === 'proof'; });
+    var jobImgs = job.filter(function (m) { return m.kind === 'image'; });
+    var jobVids = job.filter(function (m) { return m.kind === 'video'; });
+    var proofImgs = proofMedia.filter(function (m) { return m.kind === 'image'; });
+    var proofVids = proofMedia.filter(function (m) { return m.kind === 'video'; });
+    return mediaCard('job', t('od.mediaJob'), t('od.mediaJobHint'), jobImgs, jobVids) +
+      mediaCard('proof', t('od.proofTitle'), t('od.proofHint'), proofImgs, proofVids);
   }
 
   function typeText(v) {
@@ -210,16 +232,20 @@ TTV.screens = TTV.screens || {};
       [t('od.pay.weight', { name: w || '—' }), vnd(pb.weight)]
     ];
     if (Number(pb.floor) > 0) lines.push([t('od.pay.floor'), vnd(pb.floor)]);
-    lines.push([t('od.pay.km', { km: kmPay(order.distance_km) }), vnd(pb.distance)]);
+    lines.push([t('od.pay.km', { km: kmOne(order.distance_km) }), vnd(pb.distance)]);
     var matched = order.final_price != null && order.status !== 'finding';
     var totalLabel = matched ? t('od.pay.total') : t('od.pay.max');
     var total = matched ? order.final_price : order.user_offer;
     var pay = order.pay_method === 'wallet' ? t('od.pay.wallet') : t('od.pay.cash');
     return '<section class="od-card od-pay">' +
       '<h2 class="od-h od-h--in">' + esc(t('od.pay')) + '</h2>' +
-      lines.map(function (r) {
-        return '<div class="od-row od-row--soft"><span>' + esc(r[0]) + '</span><b>' + esc(r[1]) + '</b></div>';
-      }).join('') +
+      '<div class="od-pay-ref">' +
+        '<h3 class="od-pay-ref__title">' + esc(t('od.pay.ref')) + '</h3>' +
+        '<p class="od-pay-ref__hint">' + esc(t('od.pay.refHint')) + '</p>' +
+        lines.map(function (r) {
+          return '<div class="od-row od-row--soft"><span>' + esc(r[0]) + '</span><b>' + esc(r[1]) + '</b></div>';
+        }).join('') +
+      '</div>' +
       '<div class="od-row od-row--total"><span>' + esc(totalLabel) + '</span><b>' + esc(vnd(total)) + '</b></div>' +
       '<div class="od-row od-row--soft"><span>' + esc(t('od.pay.method')) + '</span><b>' + esc(pay) + '</b></div>' +
       '</section>';
@@ -339,6 +365,56 @@ TTV.screens = TTV.screens || {};
     mountMap();
   }
 
+  function liveSig(o) {
+    if (!o) return '';
+    var tl = Array.isArray(o.timeline) ? o.timeline.map(function (x) { return x && x.event; }).join(',') : '';
+    return [o.status, o.vendor_id || '', o.final_price || '', o.completed_at || '', tl].join('|');
+  }
+  function hasProofMedia() {
+    return (media || []).some(function (m) { return m.role === 'proof'; });
+  }
+  function statusToast(st) {
+    if (st === 'arriving') TTV.Components.toast(t('od.live.arriving'), 'info');
+    else if (st === 'working') TTV.Components.toast(t('od.live.working'), 'info');
+    else if (st === 'matched') TTV.Components.toast(t('od.live.matched'), 'success');
+    else if (st === 'completed') TTV.Components.toast(t('od.live.completed'), 'success');
+  }
+  function refresh(silent) {
+    if (!rootEl || !orderId) return;
+    if (loading) { pendingSilent = true; return; }
+    loading = true;
+    TTV.api.getOrder(orderId).then(function (row) {
+      if (!rootEl || orderId !== String(row && row.id || orderId)) {
+        loading = false;
+        return;
+      }
+      var prev = order && order.status;
+      var sig = liveSig(row);
+      var needMedia = !silent || sig !== orderSig || (row.status === 'completed' && !hasProofMedia());
+      var next = needMedia ? TTV.api.listOrderMedia(orderId) : Promise.resolve(null);
+      return next.then(function (rows) {
+        loading = false;
+        if (!rootEl || orderId !== String(row.id)) return;
+        order = row;
+        if (rows) media = rows;
+        var uiBusy = document.querySelector('[data-quotes-dlg]') || document.querySelector('[data-od-lb]');
+        if (silent && uiBusy) {
+          pendingSilent = true;
+          return;
+        }
+        if (!silent || sig !== orderSig) {
+          orderSig = sig;
+          paint();
+          if (silent && prev && prev !== row.status) statusToast(row.status);
+        }
+        if (pendingSilent) { pendingSilent = false; refresh(true); }
+      });
+    }).catch(function () {
+      loading = false;
+      if (pendingSilent) { pendingSilent = false; refresh(true); }
+    });
+  }
+
   function bind() {
     if (!rootEl) return;
     var copy = rootEl.querySelector('[data-od-copy]');
@@ -372,6 +448,7 @@ TTV.screens = TTV.screens || {};
       this.destroy();
       rootEl = container;
       var id = ctx && ctx.params && ctx.params.id;
+      orderId = id ? String(id) : '';
       rootEl.classList.add('is-order');
       rootEl.innerHTML = '<header class="app-header od-header"><button type="button" class="app-header__back" data-back data-after-place="' + esc(id || '') + '" data-back-fallback="/orders" aria-label="Quay lại">‹</button><h1>' +
         esc(t('od.title')) + '</h1></header><main class="page">' + TTV.Components.loading(t('common.loading')) + '</main>';
@@ -380,10 +457,15 @@ TTV.screens = TTV.screens || {};
         return Promise.all([TTV.api.getOrder(id), TTV.api.listServices(), TTV.api.listOrderMedia(id)]);
       }).then(function (pack) {
         order = pack[0];
+        orderId = String(order.id);
+        orderSig = liveSig(order);
         services = {};
         (pack[1] || []).forEach(function (s) { services[s.code || s.id] = s; });
         media = pack[2] || [];
         paint();
+        if (TTV.Live && TTV.Live.watch) {
+          unwatch = TTV.Live.watch('orders', function () { refresh(true); }, { immediate: false });
+        }
       }).catch(function (err) {
         paintError((err && err.message) || t('od.err'));
       });
@@ -392,6 +474,11 @@ TTV.screens = TTV.screens || {};
       unmountMap();
       closeDlg();
       closeZoom();
+      if (unwatch) { unwatch(); unwatch = null; }
+      loading = false;
+      pendingSilent = false;
+      orderSig = '';
+      orderId = '';
       if (rootEl) rootEl.classList.remove('is-order');
       rootEl = null;
       order = null;
