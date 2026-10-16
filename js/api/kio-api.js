@@ -38,9 +38,11 @@ const KioStore = (() => {
   const ROW_CACHE_TTL = 30 * 1000;
   const rowCache = new Map();
   const rowInflight = new Map();
+  const rowEpoch = new Map();
 
   function invalidateTable(table) {
     rowCache.delete(table);
+    rowEpoch.set(table, (rowEpoch.get(table) || 0) + 1);
   }
 
   function queuedGetKrudList(args) {
@@ -120,11 +122,18 @@ const KioStore = (() => {
 
     // Nếu cùng bảng đang được đọc, các nơi khác dùng chung Promise thay vì tạo
     // thêm một list.php mới. Điều này giảm request trùng và tránh KIO tự abort.
-    // Dedupe cả request force: nếu đúng bảng đang có một list.php chạy thì
-    // mọi caller dùng chung Promise đó. Tránh nhiều route/badge cùng F5 tạo request trùng.
+    // Caller `force` đợi request cũ xong rồi đọc lại, không dùng dữ liệu cũ.
     if (rowInflight.has(table)) {
-      return (await rowInflight.get(table)).slice();
+      const pending = rowInflight.get(table);
+      if (!force) return (await pending).slice();
+      await pending.catch(() => {});
     }
+
+    if (force) {
+      rowCache.delete(table);
+      rowEpoch.set(table, (rowEpoch.get(table) || 0) + 1);
+    }
+    const epoch = rowEpoch.get(table) || 0;
 
     const job = (async () => {
       const out = [];
@@ -166,7 +175,9 @@ const KioStore = (() => {
         page += 1;
       }
 
-      rowCache.set(table, { at: Date.now(), rows: out.slice() });
+      if ((rowEpoch.get(table) || 0) === epoch) {
+        rowCache.set(table, { at: Date.now(), rows: out.slice() });
+      }
       return out;
     })();
 
@@ -174,7 +185,7 @@ const KioStore = (() => {
     try {
       return (await job).slice();
     } finally {
-      rowInflight.delete(table);
+      if (rowInflight.get(table) === job) rowInflight.delete(table);
     }
   }
 

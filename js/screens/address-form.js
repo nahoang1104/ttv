@@ -11,11 +11,9 @@ TTV.screens = TTV.screens || {};
   ];
   var state = null;
   var rootEl = null;
-  var backAfter = false; // mở từ modal chọn địa điểm (?back=1) → lưu xong quay lại màn trước
-  var token = 0;
+  var syncingToggle = false;
 
   function esc(v) { return TTV.Components.escape(v); }
-  function t(key, vars) { return TTV.I18n.t(key, vars); }
 
   function typeIcon(id) {
     var map = {
@@ -26,6 +24,11 @@ TTV.screens = TTV.screens || {};
     };
     return map[id] || map.other;
   }
+  function typeOf(id) {
+    var found = TYPES.filter(function (tp) { return tp.id === id; })[0];
+    return found || TYPES[TYPES.length - 1];
+  }
+  TTV.Address = { types: TYPES, icon: typeIcon, of: typeOf, name: function (id) { return typeOf(id).name; } };
 
   function canSave() {
     if (!state) return false;
@@ -35,12 +38,10 @@ TTV.screens = TTV.screens || {};
 
   function markup() {
     var n = (state.detail || '').length;
-    var title = t(state.id ? 'address.form.editTitle' : 'address.form.addTitle');
-    if (state.loading) return TTV.Components.header(title, { back: true }) + '<main class="addr-page">' + TTV.Components.loading(t('common.loading')) + '</main>';
-    return TTV.Components.header(title, { back: true }) +
+    return TTV.Components.header(state.id ? 'Sửa địa chỉ' : 'Thêm địa chỉ', { back: true }) +
       '<main class="addr-page">' +
         '<button type="button" class="addr-map-btn" data-action="pick-map">' +
-          '<span class="addr-map-btn__pin" aria-hidden="true"></span> Chọn trên bản đồ</button>' +
+          '<span class="addr-map-btn__pin" aria-hidden="true"></span> Chọn Trên Bản Đồ</button>' +
         '<label class="addr-field">Tên gợi nhớ' +
           '<input type="text" data-field="label" maxlength="80" placeholder="VD: Nhà, Văn phòng" value="' + esc(state.label) + '">' +
         '</label>' +
@@ -57,12 +58,21 @@ TTV.screens = TTV.screens || {};
         '<p class="addr-label">Loại địa chỉ</p>' +
         '<div class="addr-types">' + TYPES.map(function (tp) {
           return '<button type="button" class="addr-type' + (state.type === tp.id ? ' is-selected' : '') + '" data-type="' + tp.id + '">' +
-            typeIcon(tp.icon) + '<small>' + esc(tp.name) + '</small></button>';
+            typeIcon(tp.id) + '<small>' + esc(tp.name) + '</small></button>';
         }).join('') + '</div>' +
         '<div class="addr-default">' +
-          '<div><strong>Đặt làm địa chỉ mặc định</strong>' +
-            '<small>Địa chỉ mặc định sẽ được ưu tiên khi tạo đơn hàng</small></div>' +
-          '<label class="toggle"><input type="checkbox" data-field="is_default"' + (state.is_default ? ' checked' : '') + '><span class="toggle__track"></span></label>' +
+          '<label class="toggle">' +
+            '<span class="addr-default__txt"><strong>Mặc định điểm bốc hàng</strong>' +
+              '<small>Điền sẵn vào điểm bốc khi đặt đơn</small></span>' +
+            '<input type="checkbox" data-field="default_pickup"' + (state.default_for === 'pickup' ? ' checked' : '') + '>' +
+            '<span class="toggle__track"></span>' +
+          '</label>' +
+          '<label class="toggle">' +
+            '<span class="addr-default__txt"><strong>Mặc định điểm trả hàng</strong>' +
+              '<small>Điền sẵn vào điểm trả khi đặt đơn</small></span>' +
+            '<input type="checkbox" data-field="default_dropoff"' + (state.default_for === 'dropoff' ? ' checked' : '') + '>' +
+            '<span class="toggle__track"></span>' +
+          '</label>' +
         '</div>' +
       '</main>' +
       '<div class="addr-bar"><button type="button" class="btn btn-primary btn-block addr-save" data-action="save"' + (canSave() ? '' : ' disabled') + '>' +
@@ -90,7 +100,7 @@ TTV.screens = TTV.screens || {};
 
   function onInput(e) {
     var field = e.target.getAttribute('data-field');
-    if (!field || field === 'is_default') return;
+    if (!field || field === 'default_pickup' || field === 'default_dropoff') return;
     var val = e.target.value;
     if (field === 'detail') val = val.slice(0, 250);
     if (field === 'contact_phone') val = val.replace(/[^\d+\s]/g, '');
@@ -99,9 +109,30 @@ TTV.screens = TTV.screens || {};
     syncSave();
   }
 
+  function syncToggles() {
+    if (!rootEl) return;
+    var pick = rootEl.querySelector('[data-field="default_pickup"]');
+    var drop = rootEl.querySelector('[data-field="default_dropoff"]');
+    if (pick) pick.checked = state.default_for === 'pickup';
+    if (drop) drop.checked = state.default_for === 'dropoff';
+  }
+
   function onChange(e) {
-    if (e.target.getAttribute('data-field') !== 'is_default') return;
-    state.is_default = e.target.checked;
+    if (syncingToggle) return;
+    var field = e.target.getAttribute('data-field');
+    if (field === 'default_pickup') {
+      state.default_for = e.target.checked ? 'pickup' : (state.default_for === 'pickup' ? '' : state.default_for);
+    } else if (field === 'default_dropoff') {
+      state.default_for = e.target.checked ? 'dropoff' : (state.default_for === 'dropoff' ? '' : state.default_for);
+    } else {
+      return;
+    }
+    if (e.target.focus) {
+      try { e.target.focus({ preventScroll: true }); } catch (_) {}
+    }
+    syncingToggle = true;
+    syncToggles();
+    syncingToggle = false;
   }
 
   function onClick(e) {
@@ -137,6 +168,7 @@ TTV.screens = TTV.screens || {};
       action.disabled = true;
       TTV.api.saveAddress({
         id: state.id || undefined,
+        created_at: state.created_at,
         label: state.label,
         type: state.type,
         detail: state.detail,
@@ -144,11 +176,10 @@ TTV.screens = TTV.screens || {};
         lng: state.lng,
         contact_name: state.contact_name,
         contact_phone: state.contact_phone,
-        is_default: state.is_default
+        default_for: state.default_for
       }).then(function () {
-        TTV.Components.toast(t('address.saved'), 'success');
-        if (backAfter && history.length > 1) history.back();
-        else TTV.Router.navigate('/address', { replace: true }); // về Sổ địa chỉ
+        TTV.Components.toast('Đã lưu địa chỉ.', 'success');
+        TTV.Router.navigate('/address');
       }).catch(function (err) {
         state.saving = false;
         syncSave();
@@ -157,67 +188,78 @@ TTV.screens = TTV.screens || {};
     }
   }
 
-  function blank() {
-    return { id: null, label: '', detail: '', lat: null, lng: null, contact_name: '', contact_phone: '', type: 'home', is_default: false, saving: false, loading: false };
+  function blankState() {
+    return {
+      id: '',
+      created_at: '',
+      label: '',
+      detail: '',
+      lat: null,
+      lng: null,
+      contact_name: '',
+      contact_phone: '',
+      type: 'home',
+      default_for: '',
+      saving: false
+    };
+  }
+
+  function fillFromUser() {
+    if (!TTV.api.getCurrentUser) return;
+    TTV.api.getCurrentUser().then(function (user) {
+      if (!user || !state || state.id) return;
+      if (!state.contact_name && user.name) state.contact_name = user.name;
+      if (!state.contact_phone && user.phone) state.contact_phone = user.phone;
+      var nameEl = rootEl && rootEl.querySelector('[data-field="contact_name"]');
+      var phoneEl = rootEl && rootEl.querySelector('[data-field="contact_phone"]');
+      if (nameEl && !nameEl.value) nameEl.value = state.contact_name;
+      if (phoneEl && !phoneEl.value) phoneEl.value = state.contact_phone;
+      syncSave();
+    }).catch(function () {});
   }
 
   TTV.screens.addressForm = {
-    TYPES: TYPES,
-    typeIcon: typeIcon,
-    // ctx.params.id có → chế độ Sửa (#/address/edit/:id); không có → Thêm (#/address/new)
     render: function (container, ctx) {
-      var my = ++token;
-      var id = ctx && ctx.params && ctx.params.id;
-      backAfter = !!(ctx && ctx.query && ctx.query.back === '1');
       rootEl = container;
-      state = blank();
-      if (id) {
-        state.id = id;
-        state.loading = true;
+      state = blankState();
+      var id = ctx && ctx.params && ctx.params.id;
+      if (!id) {
         paint();
-        TTV.api.getAddress(id).then(function (row) {
-          if (my !== token || !state) return;
-          if (!row) {
-            TTV.Components.toast(t('address.notFound'), 'danger');
-            TTV.Router.navigate('/address', { replace: true });
-            return;
-          }
-          state.loading = false;
-          state.label = row.label || '';
-          state.detail = row.detail || '';
-          state.lat = row.lat;
-          state.lng = row.lng;
-          state.contact_name = row.contact_name || '';
-          state.contact_phone = row.contact_phone || '';
-          state.type = row.type || 'other';
-          state.is_default = !!row.is_default;
-          paint();
-        }).catch(function () {
-          if (my !== token || !state) return;
-          TTV.Components.toast(t('address.loadError'), 'danger');
-          TTV.Router.navigate('/address', { replace: true });
-        });
+        fillFromUser();
         return;
       }
-      paint();
-      if (TTV.api.getCurrentUser) {
-        TTV.api.getCurrentUser().then(function (user) {
-          if (!user || !state || my !== token) return;
-          if (!state.contact_name && user.name) state.contact_name = user.name;
-          if (!state.contact_phone && user.phone) state.contact_phone = user.phone;
-          var nameEl = rootEl && rootEl.querySelector('[data-field="contact_name"]');
-          var phoneEl = rootEl && rootEl.querySelector('[data-field="contact_phone"]');
-          if (nameEl && !nameEl.value) nameEl.value = state.contact_name;
-          if (phoneEl && !phoneEl.value) phoneEl.value = state.contact_phone;
-          syncSave();
-        }).catch(function () {});
-      }
+      rootEl.innerHTML = TTV.Components.header('Sửa địa chỉ', { back: true }) +
+        '<main class="page">' + TTV.Components.loading('Đang tải…') + '</main>';
+      TTV.api.getAddress(id).then(function (row) {
+        if (!row) {
+          TTV.Components.toast('Không tìm thấy địa chỉ.', 'danger');
+          TTV.Router.navigate('/address');
+          return;
+        }
+        state = {
+          id: row.id,
+          created_at: row.created_at || '',
+          label: row.label || '',
+          detail: row.detail || '',
+          lat: row.lat,
+          lng: row.lng,
+          contact_name: row.contact_name || '',
+          contact_phone: row.contact_phone || '',
+          type: row.type || 'home',
+          default_for: row.default_for || '',
+          saving: false
+        };
+        paint();
+      }).catch(function (err) {
+        TTV.Components.toast((err && err.message) || 'Không tải được địa chỉ.', 'danger');
+        TTV.Router.navigate('/address');
+      });
     },
     destroy: function () {
-      token++;
       if (TTV.ui.placePicker) TTV.ui.placePicker.close();
       rootEl = null;
       state = null;
+      syncingToggle = false;
     }
   };
 })(window.TTV);

@@ -1,0 +1,389 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>TTV Database Viewer</title>
+    <meta name="description" content="Xem chỉ đọc các bảng ttv_ trên KIO" />
+    <script src="https://kio.dvqt.vn/list.js"></script>
+    <script src="https://kio.dvqt.vn/krud.js"></script>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #eef3f9;
+        --surface: #fff;
+        --ink: #14213d;
+        --muted: #6b7686;
+        --line: #d9e2ef;
+        --brand: #1b7be4;
+        --brand-dark: #0643a0;
+        --brand-soft: #e8f3ff;
+        --danger: #e5484d;
+        --shadow: 0 16px 42px rgba(22, 43, 75, .07);
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-width: 320px;
+        background: var(--bg);
+        color: var(--ink);
+        font: 14px/1.5 "Be Vietnam Pro", system-ui, sans-serif;
+      }
+      button, input, select { font: inherit; }
+      button, select { min-height: 44px; }
+      .shell { width: min(1840px, calc(100% - 40px)); margin: 28px auto; }
+      .topbar, .sidebar, .workspace {
+        border: 1px solid var(--line);
+        background: var(--surface);
+        box-shadow: var(--shadow);
+      }
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 24px;
+        min-height: 96px;
+        padding: 22px 28px;
+        border-radius: 22px;
+      }
+      .brand { display: flex; align-items: center; gap: 16px; }
+      .brand-icon {
+        width: 56px; height: 56px;
+        display: grid; place-items: center;
+        border-radius: 16px; color: #fff;
+        background: linear-gradient(145deg, #0643a0, #1b7be4);
+      }
+      .brand h1 { margin: 0; font-size: 26px; letter-spacing: -.6px; }
+      .brand p { margin: 4px 0 0; color: var(--muted); }
+      .summary { display: flex; gap: 8px; flex-wrap: wrap; }
+      .pill {
+        display: inline-flex; align-items: center;
+        min-height: 36px; padding: 6px 12px;
+        border-radius: 999px; background: #edf4ff;
+        color: #31527f; font-size: 12px; font-weight: 700;
+      }
+      .pill.readonly { background: var(--brand-soft); color: var(--brand-dark); }
+      .layout {
+        display: grid;
+        grid-template-columns: 320px minmax(0, 1fr);
+        gap: 24px; margin-top: 24px;
+      }
+      .sidebar, .workspace { min-height: calc(100vh - 176px); border-radius: 22px; }
+      .sidebar { padding: 22px; }
+      .sidebar h2 { margin: 0 0 12px; font-size: 16px; }
+      .search { position: relative; }
+      .search input {
+        width: 100%; min-height: 48px;
+        padding: 10px 14px 10px 40px;
+        border: 1px solid #cdd9e8; border-radius: 12px;
+      }
+      .search svg { position: absolute; top: 14px; left: 13px; color: var(--muted); }
+      .table-list { height: calc(100vh - 300px); min-height: 280px; margin-top: 14px; overflow: auto; }
+      .table-item {
+        width: 100%; min-height: 68px;
+        display: grid; grid-template-columns: minmax(0, 1fr) auto;
+        gap: 4px 10px; padding: 12px 14px;
+        border: 1px solid transparent; border-radius: 12px;
+        background: transparent; text-align: left; cursor: pointer;
+      }
+      .table-item:hover { background: #f7f9fc; }
+      .table-item.active { border-color: #9ec4f0; background: var(--brand-soft); }
+      .table-item strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .table-item small {
+        grid-column: 1 / -1; color: #4a6fa0;
+        font: 12px/1.35 ui-monospace, Consolas, monospace;
+      }
+      .type { color: var(--brand); font-size: 10px; font-weight: 800; letter-spacing: .4px; }
+      .workspace { min-width: 0; padding: 24px; }
+      .workspace-head {
+        display: flex; align-items: center; justify-content: space-between;
+        gap: 16px; margin-bottom: 16px;
+      }
+      .eyebrow { color: var(--brand); font-size: 11px; font-weight: 800; letter-spacing: 1.2px; }
+      .workspace h2 {
+        margin: 4px 0 0;
+        font: 700 22px/1.25 ui-monospace, Consolas, monospace;
+        overflow-wrap: anywhere;
+      }
+      .controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+      .controls select, .refresh {
+        border: 1px solid #cdd9e8; border-radius: 11px; background: #fff;
+      }
+      .controls select { min-height: 40px; padding: 6px 12px; }
+      .refresh {
+        display: inline-flex; align-items: center; gap: 8px;
+        padding: 8px 14px; font-weight: 700; cursor: pointer;
+      }
+      .data-panel {
+        min-height: 440px; border: 1px solid #cfdbea;
+        border-radius: 16px; overflow: auto; background: #fff;
+      }
+      table { width: 100%; border-collapse: collapse; white-space: nowrap; }
+      th, td { padding: 11px 14px; border-bottom: 1px solid #e8edf4; text-align: left; vertical-align: top; }
+      th {
+        position: sticky; top: 0; background: #f4f7fb;
+        color: #536580; font-size: 10px; letter-spacing: .5px; text-transform: uppercase;
+      }
+      td { max-width: 340px; font-size: 12px; }
+      tbody tr:hover { background: #f5f9ff; }
+      .complex {
+        display: block; max-width: 320px; overflow: hidden;
+        color: #40556f; font-size: 11px; text-overflow: ellipsis;
+      }
+      .empty, .loading, .error {
+        min-height: 420px; display: grid; place-content: center;
+        padding: 30px; text-align: center;
+      }
+      .error { color: var(--danger); }
+      .footer {
+        display: flex; align-items: center; justify-content: space-between;
+        gap: 16px; min-height: 64px; color: var(--muted); font-size: 12px;
+      }
+      .pagination { display: flex; gap: 8px; }
+      .pagination button {
+        padding: 8px 14px; border: 1px solid var(--line);
+        border-radius: 10px; background: #fff; font-weight: 700; cursor: pointer;
+      }
+      .pagination button:disabled { opacity: .55; cursor: not-allowed; }
+      @media (max-width: 980px) {
+        .layout { grid-template-columns: 1fr; }
+        .sidebar, .workspace { min-height: 0; }
+        .table-list { height: auto; max-height: 280px; }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-icon" aria-hidden="true">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <ellipse cx="12" cy="5" rx="7" ry="3"></ellipse>
+              <path d="M5 5v7c0 1.7 3.1 3 7 3s7-1.3 7-3V5"></path>
+              <path d="M5 12v7c0 1.7 3.1 3 7 3s7-1.3 7-3v-7"></path>
+            </svg>
+          </div>
+          <div>
+            <h1>TTV Database Viewer</h1>
+            <p>Chỉ các bảng <code>ttv_*</code> trên KIO — chỉ xem, không sửa</p>
+          </div>
+        </div>
+        <div class="summary">
+          <span class="pill readonly">READ ONLY</span>
+          <span class="pill" id="tableCount">— bảng</span>
+          <span class="pill" id="objectCount">— bản ghi</span>
+        </div>
+      </header>
+      <div class="layout">
+        <aside class="sidebar">
+          <h2>Bảng TingTingVac</h2>
+          <div class="search">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+            <input id="tableSearch" type="search" placeholder="Tìm ttv_…" aria-label="Tìm bảng" />
+          </div>
+          <nav class="table-list" id="tableList"></nav>
+        </aside>
+        <section class="workspace">
+          <div class="workspace-head">
+            <div>
+              <div class="eyebrow">BẢNG ĐANG XEM</div>
+              <h2 id="currentTable">Đang kết nối…</h2>
+            </div>
+            <div class="controls">
+              <span class="pill" id="recordCount">— bản ghi</span>
+              <label>Mỗi trang
+                <select id="pageSize" aria-label="Số bản ghi mỗi trang">
+                  <option>10</option>
+                  <option>25</option>
+                  <option selected>50</option>
+                  <option>100</option>
+                </select>
+              </label>
+              <button class="refresh" id="refreshButton" type="button">Làm mới</button>
+            </div>
+          </div>
+          <div class="data-panel" id="dataPanel">
+            <div class="loading"><strong>Đang tải</strong><span>Kết nối KIO…</span></div>
+          </div>
+          <footer class="footer">
+            <span id="pageInfo">Trang — / —</span>
+            <div class="pagination">
+              <button id="previousPage" type="button">← Trang trước</button>
+              <button id="nextPage" type="button">Trang sau →</button>
+            </div>
+          </footer>
+        </section>
+      </div>
+    </main>
+    <script src="js/api/kio-api.js?v=31"></script>
+    <script>
+      var PREFIX = 'ttv_';
+      var HIDDEN = { password_hash: 1, salt: 1, seed_password_hint: 1, passwordHash: 1, demoPassword: 1 };
+      var TABLES = [
+        { slug: 'users', label: 'Khách' },
+        { slug: 'staff', label: 'Admin' },
+        { slug: 'vendors', label: 'Thợ / tổ đội' },
+        { slug: 'sessions', label: 'Phiên đăng nhập' },
+        { slug: 'services', label: 'Dịch vụ' },
+        { slug: 'pricing_config', label: 'Cấu hình giá' },
+        { slug: 'app_settings', label: 'Cài đặt hệ thống' },
+        { slug: 'addresses', label: 'Địa chỉ' },
+        { slug: 'orders', label: 'Đơn hàng' },
+        { slug: 'order_media', label: 'Ảnh / video đơn' },
+        { slug: 'order_events', label: 'Mốc đơn' },
+        { slug: 'quotes', label: 'Báo giá' },
+        { slug: 'wallet_transactions', label: 'Giao dịch ví khách' },
+        { slug: 'payment_methods', label: 'Phương thức thanh toán' },
+        { slug: 'coupons', label: 'Mã giảm giá' },
+        { slug: 'user_coupons', label: 'Mã của khách' },
+        { slug: 'notifications', label: 'Thông báo' },
+        { slug: 'notification_settings', label: 'Cài đặt thông báo' },
+        { slug: 'reviews', label: 'Đánh giá' },
+        { slug: 'faqs', label: 'FAQ' },
+        { slug: 'policies', label: 'Điều khoản' },
+        { slug: 'banners', label: 'Banner' },
+        { slug: 'vendor_transactions', label: 'Giao dịch ví thợ' },
+        { slug: 'withdrawals', label: 'Rút tiền thợ' },
+        { slug: 'reports', label: 'Báo cáo' },
+        { slug: 'broadcasts', label: 'Thông báo hệ thống' },
+        { slug: 'audit_logs', label: 'Nhật ký' },
+        { slug: 'meta', label: 'Meta (seed)' }
+      ].map(function (t) {
+        return { name: PREFIX + t.slug, label: t.label, type: 'TABLE' };
+      });
+
+      var cache = new Map();
+      var selectedTable = '';
+      var currentPage = 1;
+      var pageSize = 50;
+
+      function el(id) { return document.getElementById(id); }
+      function esc(v) {
+        return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) {
+          return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+        });
+      }
+      function remoteOk(name) {
+        return String(name || '').indexOf(PREFIX) === 0;
+      }
+      async function readCollection(table) {
+        if (!remoteOk(table)) throw new Error('Chỉ được xem bảng ' + PREFIX + '*');
+        try {
+          var rows = await KioStore.listCollection(table, { force: true });
+          return Array.isArray(rows) ? rows : [];
+        } catch (err) {
+          var m = String(err && err.message || err);
+          if (/42S02|1146|doesn'?t exist|unknown table|không đọc/i.test(m)) return [];
+          throw err;
+        }
+      }
+      function renderTableList() {
+        var q = el('tableSearch').value.trim().toLowerCase();
+        var filtered = TABLES.filter(function (t) {
+          return (t.label + ' ' + t.name).toLowerCase().indexOf(q) >= 0;
+        });
+        el('tableList').innerHTML = filtered.length
+          ? filtered.map(function (t) {
+            return '<button class="table-item' + (t.name === selectedTable ? ' active' : '') + '" type="button" data-table="' + esc(t.name) + '">' +
+              '<strong>' + esc(t.label) + '</strong><span class="type">TTV</span>' +
+              '<small>' + esc(t.name) + '</small></button>';
+          }).join('')
+          : '<div class="empty"><span>Không tìm thấy bảng ttv_ phù hợp.</span></div>';
+      }
+      function formatCell(value, column) {
+        if (HIDDEN[column]) return '••••••••';
+        if (value === null || value === undefined || value === '') return '—';
+        if (typeof value === 'object') {
+          var json = JSON.stringify(value);
+          return '<code class="complex" title="' + esc(json) + '">' + esc(json) + '</code>';
+        }
+        if (typeof value === 'boolean') return value ? 'true' : 'false';
+        return esc(value);
+      }
+      function renderData() {
+        var rows = cache.get(selectedTable) || [];
+        var totalPages = Math.max(1, Math.ceil(rows.length / pageSize) || 1);
+        currentPage = Math.min(currentPage, totalPages);
+        var start = (currentPage - 1) * pageSize;
+        var pageRows = rows.slice(start, start + pageSize);
+        var columns = [];
+        rows.forEach(function (row) {
+          Object.keys(row || {}).forEach(function (k) {
+            if (columns.indexOf(k) < 0) columns.push(k);
+          });
+        });
+        el('recordCount').textContent = rows.length + ' bản ghi';
+        el('pageInfo').textContent = 'Trang ' + currentPage + ' / ' + totalPages;
+        el('previousPage').disabled = currentPage <= 1;
+        el('nextPage').disabled = currentPage >= totalPages;
+        if (!rows.length) {
+          el('dataPanel').innerHTML = '<div class="empty"><div><strong>Chưa có bản ghi</strong><span>Bảng này trống hoặc chưa được tạo trên KIO.</span></div></div>';
+          return;
+        }
+        el('dataPanel').innerHTML = '<table><thead><tr>' + columns.map(function (c) {
+          return '<th>' + esc(c) + '</th>';
+        }).join('') + '</tr></thead><tbody>' + pageRows.map(function (row) {
+          return '<tr>' + columns.map(function (c) {
+            return '<td>' + formatCell(row[c], c) + '</td>';
+          }).join('') + '</tr>';
+        }).join('') + '</tbody></table>';
+      }
+      async function selectTable(table, force) {
+        if (!remoteOk(table)) return;
+        selectedTable = table;
+        currentPage = 1;
+        renderTableList();
+        el('currentTable').textContent = table;
+        el('dataPanel').innerHTML = '<div class="loading"><div><strong>Đang tải dữ liệu</strong><span>Ghép chunk payload từ KIO…</span></div></div>';
+        try {
+          if (force || !cache.has(table)) cache.set(table, await readCollection(table));
+          renderData();
+        } catch (error) {
+          el('recordCount').textContent = 'Lỗi';
+          el('dataPanel').innerHTML = '<div class="error"><div><strong>Không đọc được bảng</strong>' + esc(error.message) + '</div></div>';
+        }
+      }
+      async function startViewer() {
+        el('tableCount').textContent = TABLES.length + ' bảng ttv_';
+        renderTableList();
+        if (typeof getKrudList !== 'function' || typeof KioStore === 'undefined') {
+          el('currentTable').textContent = 'Không thể kết nối';
+          el('dataPanel').innerHTML = '<div class="error"><strong>Thiếu SDK KIO</strong></div>';
+          return;
+        }
+        cache.clear();
+        await selectTable(selectedTable || TABLES[0].name, true);
+        el('objectCount').textContent = '… bản ghi';
+        var total = 0;
+        TABLES.reduce(function (chain, t) {
+          return chain.then(function () {
+            return (cache.has(t.name) ? Promise.resolve(cache.get(t.name)) : readCollection(t.name)).then(function (rows) {
+              cache.set(t.name, rows);
+              total += (rows || []).length;
+              el('objectCount').textContent = total + ' bản ghi';
+            }).catch(function () {});
+          });
+        }, Promise.resolve());
+      }
+      el('tableSearch').addEventListener('input', renderTableList);
+      el('tableList').addEventListener('click', function (e) {
+        var btn = e.target.closest('[data-table]');
+        if (btn) selectTable(btn.getAttribute('data-table'));
+      });
+      el('pageSize').addEventListener('change', function (e) {
+        pageSize = Number(e.target.value) || 50;
+        currentPage = 1;
+        renderData();
+      });
+      el('refreshButton').addEventListener('click', startViewer);
+      el('previousPage').addEventListener('click', function () {
+        if (currentPage > 1) { currentPage -= 1; renderData(); }
+      });
+      el('nextPage').addEventListener('click', function () {
+        var rows = cache.get(selectedTable) || [];
+        if (currentPage < Math.ceil(rows.length / pageSize)) { currentPage += 1; renderData(); }
+      });
+      startViewer();
+    </script>
+  </body>
+</html>

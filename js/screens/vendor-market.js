@@ -9,6 +9,10 @@ TTV.screens = TTV.screens || {};
   var boxEl = null, clickHandler = null;
   var sort = 'newest';    // giữ lựa chọn sắp xếp khi quay lại từ chi tiết đơn
   var data = null;        // kết quả api.listMarketOrders gần nhất
+  var unwatch = null;
+  var listSig = '';
+  var loading = false;
+  var pendingSilent = false;
 
   function t(key, params) { return TTV.I18n.t(key, params); }
   function esc(v) { return C.escape(v); }
@@ -56,10 +60,17 @@ TTV.screens = TTV.screens || {};
       '</div></a>';
   }
 
-  function toolbarMarkup(count) {
+  function toolbarMarkup(count, skip) {
+    skip = skip || {};
+    var vendor = data && data.vendor;
+    var crewChip = vendor && vendor.type !== 'personal' && skip.team_size
+      ? '<span class="vm-crew" data-status="' + (skip.team_free <= 0 ? 'full' : (skip.team_busy ? 'partial' : 'idle')) + '">' +
+          esc(t('vendorMarket.crew', { free: skip.team_free, size: skip.team_size })) + '</span>'
+      : '';
     return '<div class="vm-sorts" role="group" aria-label="Sắp xếp">' +
       SORTS.map(function (s) { return C.chip(t(s.label), s.id === sort, { action: 'vm-sort:' + s.id }); }).join('') + '</div>' +
       '<div class="vm-meta"><span>' + esc(t('vendorMarket.count', { n: count })) + '</span>' +
+      crewChip +
       '<button type="button" class="link-btn" data-vm-action="refresh">' + esc(t('vendorMarket.refresh')) + '</button></div>' +
       (sort === 'nearest' ? '<p class="vm-hint">' + esc(t('vendorMarket.sort.hint')) + '</p>' : '');
   }
@@ -76,22 +87,61 @@ TTV.screens = TTV.screens || {};
       }
       return;
     }
+    var skip = d.skip || {};
+    if (skip.busy_job) {
+      boxEl.innerHTML = C.emptyState(t('vendorMarket.busy.title'), t('vendorMarket.busy.desc', { code: skip.busy_code || '' }), { icon: '▤' }) +
+        '<button type="button" class="btn btn-primary btn-block" data-route="/vendor/jobs">' + esc(t('vendorMarket.busy.cta')) + '</button>';
+      return;
+    }
+    if (skip.team_busy && skip.team_free === 0) {
+      boxEl.innerHTML = C.emptyState(t('vendorMarket.capacity.title'), t('vendorMarket.capacity.desc'), { icon: '▤' }) +
+        '<button type="button" class="btn btn-primary btn-block" data-route="/vendor/jobs">' + esc(t('vendorMarket.busy.cta')) + '</button>';
+      return;
+    }
     var list = TTV.api.sortMarketOrders(d.orders, sort);
-    boxEl.innerHTML = toolbarMarkup(list.length) +
+    var emptyDesc = skip.blocked_capacity
+      ? t('vendorMarket.empty.capacity', { n: skip.blocked_capacity, free: skip.team_free })
+      : skip.blocked_workers
+        ? t('vendorMarket.empty.workers', { n: skip.blocked_workers })
+        : t('vendorMarket.empty.desc');
+    boxEl.innerHTML = toolbarMarkup(list.length, skip) +
       (list.length
         ? '<div class="vm-list">' + list.map(cardMarkup).join('') + '</div>'
-        : C.emptyState(t('vendorMarket.empty.title'), t('vendorMarket.empty.desc'), { icon: '▤' }));
+        : C.emptyState(t('vendorMarket.empty.title'), emptyDesc, { icon: '▤' }));
   }
 
-  function load(silent) {
+  function marketSig(res) {
+    var r = (res && res.readiness) || {};
+    var orders = (res && res.orders) || [];
+    var skip = (res && res.skip) || {};
+    return [r.ready ? '1' : '0', r.blocked ? '1' : '0', skip.busy_job ? '1' : '0', skip.busy_code || '', skip.team_free, skip.blocked_capacity || 0].join(':') + '|' + orders.map(function (o) {
+      return o.id + ':' + ((o.my_quote && o.my_quote.status) || '') + ':' + o.offer;
+    }).join('|');
+  }
+  function load(silent, retriesLeft) {
+    if (loading) { pendingSilent = true; return; }
+    retriesLeft = retriesLeft == null ? 0 : retriesLeft;
     var my = ++token;
+    loading = true;
     if (!silent && boxEl) boxEl.innerHTML = C.loading(t('common.loading'));
     TTV.api.listMarketOrders({ sort: sort }).then(function (res) {
+      loading = false;
       if (my !== token || !boxEl) return;
-      data = res; paint();
+      var nextSig = marketSig(res);
+      if (silent && retriesLeft > 0 && nextSig === listSig) {
+        setTimeout(function () { if (token === my && boxEl) load(true, retriesLeft - 1); }, 400);
+        return;
+      }
+      if (!(silent && nextSig === listSig && data)) {
+        listSig = nextSig;
+        data = res;
+        paint();
+      }
+      if (pendingSilent) { pendingSilent = false; load(true); }
     }).catch(function (err) {
+      loading = false;
       if (my !== token || !boxEl) return;
-      if (err && (err.code === 'LOCKED' || err.code === 'NOT_FOUND' || err.code === 'FORBIDDEN')) {
+      if (err && err.code === 'LOCKED') {
         TTV.api.logoutAndGo().then(function () { C.toast(t('vendor.locked'), 'danger'); });
         return;
       }
@@ -117,9 +167,16 @@ TTV.screens = TTV.screens || {};
     clickHandler = onClick;
     box.addEventListener('click', clickHandler);
     load(false);
+    if (TTV.Live && TTV.Live.watch) {
+      unwatch = TTV.Live.watch('orders', function (fromPoll) { load(true, fromPoll ? 0 : 4); }, { immediate: false });
+    }
   }
   function destroy() {
     token++;
+    loading = false;
+    pendingSilent = false;
+    listSig = '';
+    if (unwatch) { unwatch(); unwatch = null; }
     if (boxEl && clickHandler) boxEl.removeEventListener('click', clickHandler);
     boxEl = null; clickHandler = null;
   }

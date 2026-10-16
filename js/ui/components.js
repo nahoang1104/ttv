@@ -2,7 +2,11 @@
 window.TTV = window.TTV || {};
 (function (TTV) {
   function esc(v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]); }); }
-  function attrs(obj) { return Object.keys(obj || {}).map(function (k) { return ' ' + k + '="' + esc(obj[k]) + '"'; }).join(''); }
+  function attrs(obj) {
+    return Object.keys(obj || {}).filter(function (k) { return obj[k] != null && obj[k] !== false; }).map(function (k) {
+      return ' ' + k + '="' + esc(obj[k]) + '"';
+    }).join('');
+  }
   var C = {
     escape: esc,
     header: function (title, opts) { opts = opts || {}; return '<header class="app-header ' + (opts.large ? 'app-header--large' : '') + '">' + (opts.back === false ? '' : '<button class="app-header__back" data-back aria-label="Quay lại">‹</button>') + '<h1>' + esc(title) + '</h1>' + (opts.action ? '<button class="app-header__action" data-action="' + esc(opts.action) + '">' + esc(opts.actionLabel || '…') + '</button>' : '') + '</header>'; },
@@ -31,7 +35,14 @@ window.TTV = window.TTV || {};
     toggle: function (label, checked, opts) { opts = opts || {}; return '<label class="toggle"><span>' + esc(label) + '</span><input type="checkbox"' + (checked ? ' checked' : '') + attrs({'name':opts.name || null,'data-action':opts.action || null}) + '><span class="toggle__track"></span></label>'; },
     stepper: function (label, value, opts) { opts = opts || {}; var min = opts.min == null ? 0 : opts.min, max = opts.max == null ? 99 : opts.max; return '<div class="stepper" data-min="' + min + '" data-max="' + max + '"><span>' + esc(label) + '</span><div class="stepper__controls"><button type="button" data-step="-1" aria-label="Giảm">−</button><output>' + esc(value == null ? min : value) + '</output><button type="button" data-step="1" aria-label="Tăng">+</button></div></div>'; },
     tabs: function (items, active) { return '<div class="horizontal-tabs" role="tablist">' + (items || []).map(function(it){return '<button role="tab" aria-selected="' + (it.id === active) + '" class="horizontal-tabs__item ' + (it.id === active ? 'is-active' : '') + '" data-tab="' + esc(it.id) + '">' + esc(it.label) + '</button>';}).join('') + '</div>'; },
-    search: function (placeholder, opts) { opts = opts || {}; return '<label class="search-field"><span aria-hidden="true">⌕</span><input type="search" placeholder="' + esc(placeholder || 'Tìm kiếm') + '"' + attrs({name:opts.name || 'q','data-search':opts.action || null}) + '></label>'; },
+    search: function (placeholder, opts) {
+      opts = opts || {};
+      var a = { type: 'search', name: opts.name || 'q', placeholder: placeholder || 'Tìm kiếm' };
+      if (opts.value) a.value = opts.value;
+      if (opts.action) a['data-search'] = opts.action;
+      Object.keys(opts.input || {}).forEach(function (k) { a[k] = opts.input[k]; });
+      return '<label class="search-field' + (opts.className ? ' ' + esc(opts.className) : '') + '"><span aria-hidden="true">⌕</span><input' + attrs(a) + '></label>';
+    },
     badge: function (label, state) { return '<span class="badge badge--' + esc(state || 'neutral') + '">' + esc(label) + '</span>'; },
     notice: function (message, title) { return '<aside class="notice"><span class="notice__icon">ⓘ</span><div>' + (title ? '<strong>' + esc(title) + '</strong>' : '') + '<p>' + esc(message) + '</p></div></aside>'; },
     avatar: function (name, src, opts) { opts = opts || {}; var content = src ? '<img src="' + esc(src) + '" alt="' + esc(name || 'Avatar') + '">' : esc((name || '?').trim().charAt(0).toUpperCase() || '?'); return '<span class="avatar avatar--' + esc(opts.size || 'md') + '">' + content + '</span>'; }
@@ -39,7 +50,17 @@ window.TTV = window.TTV || {};
   TTV.Components = C;
   document.addEventListener('click', function (e) {
     var route = e.target.closest('[data-route]'); if (route) { e.preventDefault(); TTV.Router.navigate(route.getAttribute('data-route')); return; }
-    var back = e.target.closest('[data-back]'); if (back) { e.preventDefault(); if (history.length > 1) history.back(); else TTV.Router.navigate('/'); return; }
+    var back = e.target.closest('[data-back]'); if (back) {
+      e.preventDefault();
+      var placed = back.getAttribute('data-after-place');
+      if (placed && TTV.Router.consumeAfterPlace && TTV.Router.consumeAfterPlace(placed)) {
+        TTV.Router.navigate('/orders', { replace: true });
+        return;
+      }
+      if (history.length > 1) history.back();
+      else TTV.Router.navigate(back.getAttribute('data-back-fallback') || '/');
+      return;
+    }
     var closeBtn = e.target.closest('button[data-modal-close], button[data-sheet-close]');
     if (closeBtn) {
       var overlay = closeBtn.closest('.modal-backdrop, .sheet-backdrop');

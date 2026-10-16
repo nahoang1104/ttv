@@ -11,10 +11,6 @@ TTV.ui = TTV.ui || {};
   var onVideo = null;
   var rec = null;
 
-  function ownerId() {
-    var s = TTV.auth && TTV.auth.getSession && TTV.auth.getSession();
-    return (s && s.account_id) || 'local-demo';
-  }
   function toast(msg, kind) {
     if (TTV.Components && TTV.Components.toast) TTV.Components.toast(msg, kind || 'info');
   }
@@ -26,7 +22,8 @@ TTV.ui = TTV.ui || {};
     el.type = 'file';
     el.accept = accept;
     el.multiple = !!multiple;
-    el.hidden = true;
+    el.setAttribute('aria-hidden', 'true');
+    el.style.cssText = 'position:fixed;left:0;top:0;width:1px;height:1px;opacity:0;pointer-events:none;';
     document.body.appendChild(el);
     return el;
   }
@@ -96,21 +93,15 @@ TTV.ui = TTV.ui || {};
       video.src = previewUrl;
     });
   }
-  function uploadLater(file, kind, target) {
-    if (!TTV.Upload || !TTV.Upload.upload) return;
-    TTV.Upload.upload(file, { kind: kind, ownerId: ownerId() }).then(function (saved) {
-      if (target) target.path = saved.path;
-    }).catch(function () {});
-  }
   function isVideoFile(file) {
     if (!file) return false;
     if (/^video\//.test(file.type || '')) return true;
-    return /\.(webm|mp4|mov|m4v)$/i.test(file.name || '');
+    return /\.(mp4|webm|mov|m4v|avi|mkv)$/i.test(file.name || '');
   }
   function durationOf(file) {
     var hinted = Number(file && file.ttvDuration);
     if (hinted > 0 && hinted <= maxSec() + 0.5) return Promise.resolve(hinted);
-    if (TTV.Upload && TTV.Upload.validateVideo && /^video\//.test(file.type || '')) {
+    if (TTV.Upload && TTV.Upload.validateVideo) {
       return TTV.Upload.validateVideo(file).then(function (meta) { return meta.duration; });
     }
     return Promise.reject(new Error('Không đọc được thời lượng video.'));
@@ -126,15 +117,13 @@ TTV.ui = TTV.ui || {};
       if (duration > maxSec() + 0.05) return Promise.reject(new Error('Video không được dài quá 2 phút.'));
       var previewUrl = URL.createObjectURL(file);
       return capturePoster(previewUrl).then(function (poster) {
-        var item = {
+        return {
           previewUrl: previewUrl,
           poster: poster,
           path: '',
           duration: duration,
           file: file
         };
-        uploadLater(file, 'order-videos', item);
-        return item;
       });
     });
   }
@@ -409,11 +398,6 @@ TTV.ui = TTV.ui || {};
       });
     },
     readVideo: readVideo,
-    uploadImage: function (file) {
-      if (!TTV.Upload || !TTV.Upload.upload) return Promise.resolve(null);
-      return TTV.Upload.upload(file, { kind: 'order-images', ownerId: ownerId() });
-    },
-    ownerId: ownerId,
     destroy: function () {
       closeRecorder(false);
       dropInput(photoInput);

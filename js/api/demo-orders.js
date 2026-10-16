@@ -52,7 +52,10 @@ window.TTV = window.TTV || {};
         return u ? null : TTV.Store.put('users', { id: DEMO_USER, demo: true, phone: '+84900000099', name: 'Khách demo', email: 'khach.demo@example.com', login_method: 'demo', kyc_status: 'none', wallet_balance: 0, created_at: new Date(now).toISOString() });
       }).then(function () {
         return chain(made, function (m) { return TTV.Store.put('orders', m.order).then(function () { return chain(m.media, function (md) { return TTV.Store.put('order_media', md); }); }); });
-      }).then(function () { return made.length; });
+      }).then(function () {
+        if (TTV.Live && TTV.Live.ping) TTV.Live.ping('orders');
+        return made.length;
+      });
     },
     clear: function () {
       var n = 0;
@@ -61,7 +64,10 @@ window.TTV = window.TTV || {};
           .concat(p[1].filter(function (m) { return m.demo; }).map(function (m) { return ['order_media', m.id]; }));
         n = rows.length;
         return chain(rows, function (r) { return TTV.Store.remove(r[0], r[1]); });
-      }).then(function () { return n; });
+      }).then(function () {
+        if (TTV.Live && TTV.Live.ping) TTV.Live.ping('orders');
+        return n;
+      });
     }
   };
 

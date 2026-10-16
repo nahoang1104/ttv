@@ -23,7 +23,7 @@ window.TTV = window.TTV || {};
   }
   function errText(err) { return (err && err.message) || t('common.error'); }
   // Lỗi do trạng thái đơn đổi (đã ghép, hết hạn, không đủ điều kiện…): đóng form, báo và tải lại chi tiết
-  var STATE_ERRORS = { ORDER_TAKEN: 1, UNAVAILABLE: 1, NOT_ELIGIBLE: 1, OFFLINE: 1, WALLET_LOCKED: 1, QUOTE_LOCKED: 1, QUOTE_INACTIVE: 1, ORDER_NOT_FOUND: 1 };
+  var STATE_ERRORS = { ORDER_TAKEN: 1, UNAVAILABLE: 1, NOT_ELIGIBLE: 1, OFFLINE: 1, WALLET_LOCKED: 1, BUSY_JOB: 1, QUOTE_LOCKED: 1, QUOTE_INACTIVE: 1, ORDER_NOT_FOUND: 1 };
 
   /* ----- Ô đáy ----- */
   function barMarkup(v, q) {
@@ -37,6 +37,7 @@ window.TTV = window.TTV || {};
   }
   function reasonText(v) {
     if (v.block_reason === 'not_fit' && v.fit_message) return v.fit_message;
+    if (v.block_reason === 'busy') return t('vendorQuote.block.busy', { code: v.busy_code || '' });
     var k = 'vendorQuote.block.' + v.block_reason, s = t(k);
     return s === k ? t('vendorQuote.block.other') : s;
   }

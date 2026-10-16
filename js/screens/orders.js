@@ -8,22 +8,25 @@ TTV.screens = TTV.screens || {};
   var services = {};
   var tab = 'all';
   var q = '';
+  var tabsScroll = 0;
+  var tabsSwipeOff = null;
 
   function esc(v) { return TTV.Components.escape(v); }
   function t(key, vars) { return TTV.I18n.t(key, vars); }
   function money(n) { return TTV.Utils.money(n); }
 
   function serviceIcon(code) {
-    var icons = {
-      moving: '<svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="22" fill="#eef6ff"/><path fill="#1b7be4" d="M14 28.5V20l10-7 10 7v8.5h-4.2V24h-11.6v4.5z"/><path fill="#3d9cf0" d="M18.4 26.2h4.1v5.4h-4.1zm7.1 0h4.1v5.4h-4.1z"/><rect x="16.6" y="31.2" width="14.8" height="3.2" rx="1" fill="#f4b942"/></svg>',
-      warehouse: '<svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="22" fill="#eef6ff"/><path fill="#1b7be4" d="M12 29.5 24 18.2 36 29.5H12z"/><rect x="16" y="27" width="6.2" height="6.2" rx="1" fill="#f4b942"/><rect x="25.8" y="27" width="6.2" height="6.2" rx="1" fill="#f4b942"/></svg>',
-      furniture: '<svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="22" fill="#eef6ff"/><path fill="#1b7be4" d="M13 24c0-5 4.8-8.2 11-8.2S35 19 35 24v3.4H13V24z"/><rect x="12" y="26.8" width="24" height="5.2" rx="2" fill="#3d9cf0"/></svg>',
-      office: '<svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="22" fill="#eef6ff"/><path fill="#1b7be4" d="M17 33V18.5h14V33H17z"/></svg>',
-      construction: '<svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="22" fill="#eef6ff"/><rect x="14" y="26.5" width="20" height="8" rx="1.4" fill="#1b7be4"/></svg>',
-      hourly: '<svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="22" fill="#eef6ff"/><circle cx="24" cy="23" r="9.2" fill="none" stroke="#1b7be4" stroke-width="2.4"/></svg>',
-      goods: '<svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="24" cy="24" r="22" fill="#eef6ff"/><rect x="16" y="18" width="16" height="12" rx="2" fill="#1b7be4"/></svg>'
+    var photos = {
+      moving: 'uploads/img-giaodien/chuyennha.png',
+      warehouse: 'uploads/img-giaodien/bocxepkho1.png',
+      furniture: 'uploads/img-giaodien/noithat.png',
+      office: 'uploads/img-giaodien/vanphong.png',
+      construction: 'uploads/img-giaodien/congtrinh.png',
+      hourly: 'uploads/img-giaodien/theogio.png',
+      goods: 'uploads/img-giaodien/bocvachanghoa.png'
     };
-    return icons[code] || icons.goods;
+    var src = photos[code] || photos.goods;
+    return '<img src="' + esc(src) + '" alt="">';
   }
   function statusGroup(st) {
     if (st === 'finding') return 'finding';
@@ -120,6 +123,8 @@ TTV.screens = TTV.screens || {};
 
   function paint() {
     if (!rootEl) return;
+    var prevTabs = rootEl.querySelector('.jobs-tabs');
+    if (prevTabs) tabsScroll = prevTabs.scrollLeft;
     var tabs = [
       { id: 'all', label: t('orders.tab.all') },
       { id: 'finding', label: t('orders.tab.finding') },
@@ -134,10 +139,10 @@ TTV.screens = TTV.screens || {};
           '<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="11" cy="11" r="6.2" fill="none" stroke="#fff" stroke-width="1.8"/><path fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" d="m16 16 4 4"/></svg>' +
         '</button>' +
       '</header>' +
+      '<div class="jobs-tabs" role="tablist">' + tabs.map(function (tb) {
+        return '<button type="button" class="jobs-tab' + (tab === tb.id ? ' is-on' : '') + '" data-jobs-tab="' + tb.id + '" role="tab" aria-selected="' + (tab === tb.id) + '">' + esc(tb.label) + '</button>';
+      }).join('') + '</div>' +
       '<main class="jobs-page">' +
-        '<div class="jobs-tabs" role="tablist">' + tabs.map(function (tb) {
-          return '<button type="button" class="jobs-tab' + (tab === tb.id ? ' is-on' : '') + '" data-jobs-tab="' + tb.id + '" role="tab" aria-selected="' + (tab === tb.id) + '">' + esc(tb.label) + '</button>';
-        }).join('') + '</div>' +
         '<label class="jobs-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="m16 16 4 4"/></svg>' +
           '<input type="search" data-jobs-q placeholder="' + esc(t('orders.search')) + '" value="' + esc(q) + '">' +
         '</label>' +
@@ -147,8 +152,67 @@ TTV.screens = TTV.screens || {};
     bind();
   }
 
+  function showActiveTab(el) {
+    var btn = el.querySelector('.jobs-tab.is-on');
+    if (!btn) { el.scrollLeft = tabsScroll; return; }
+    var pad = 16;
+    var left = btn.offsetLeft;
+    var right = left + btn.offsetWidth;
+    var viewL = el.scrollLeft;
+    var viewR = viewL + el.clientWidth;
+    if (left < viewL + pad) el.scrollLeft = Math.max(0, left - pad);
+    else if (right > viewR - pad) el.scrollLeft = right - el.clientWidth + pad;
+  }
+
+  function bindTabsSwipe(el) {
+    if (tabsSwipeOff) tabsSwipeOff();
+    var x0 = 0, left0 = 0, pid = null, moved = false, btn = null;
+    function onMove(e) {
+      if (pid == null || e.pointerId !== pid) return;
+      var dx = e.clientX - x0;
+      if (!moved && Math.abs(dx) < 14) return;
+      moved = true;
+      el.scrollLeft = left0 - dx;
+    }
+    function onUp(e) {
+      if (pid == null || (e && e.pointerId !== pid)) return;
+      pid = null;
+      if (!moved && btn) {
+        var id = btn.getAttribute('data-jobs-tab');
+        if (id && id !== tab) {
+          tab = id;
+          paint();
+        }
+      }
+      btn = null;
+      moved = false;
+    }
+    el.addEventListener('pointerdown', function (e) {
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      pid = e.pointerId;
+      x0 = e.clientX;
+      left0 = el.scrollLeft;
+      moved = false;
+      btn = e.target.closest('[data-jobs-tab]');
+    });
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+    tabsSwipeOff = function () {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+      tabsSwipeOff = null;
+    };
+  }
+
   function bind() {
     if (!rootEl) return;
+    var tabsEl = rootEl.querySelector('.jobs-tabs');
+    if (tabsEl) {
+      bindTabsSwipe(tabsEl);
+      showActiveTab(tabsEl);
+    }
     var input = rootEl.querySelector('[data-jobs-q]');
     if (input) {
       input.addEventListener('input', function () {
@@ -167,8 +231,7 @@ TTV.screens = TTV.screens || {};
       if (inp) { inp.focus(); inp.select(); }
       return;
     }
-    var tb = e.target.closest('[data-jobs-tab]');
-    if (tb) { tab = tb.getAttribute('data-jobs-tab'); paint(); return; }
+    if (e.target.closest('[data-jobs-tab]')) return;
     var follow = e.target.closest('[data-follow]');
     if (follow) {
       e.preventDefault();
@@ -183,9 +246,7 @@ TTV.screens = TTV.screens || {};
     }
     var open = e.target.closest('[data-open]');
     if (open) {
-      var id = open.getAttribute('data-open');
-      var st = open.getAttribute('data-status');
-      if (st === 'finding') TTV.Router.navigate('/orders/' + id + '/quotes');
+      TTV.Router.navigate('/orders/' + open.getAttribute('data-open'));
     }
   }
 
@@ -212,6 +273,7 @@ TTV.screens = TTV.screens || {};
     },
     destroy: function () {
       document.removeEventListener('click', onClick);
+      if (tabsSwipeOff) tabsSwipeOff();
       rootEl = null;
       orders = [];
     }

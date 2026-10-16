@@ -14,6 +14,8 @@ TTV.screens = TTV.screens || {};
   var currentView = '';   // 'home' | 'market' | 'jobs' | 'profile' (để nút Thử lại vẽ lại đúng màn)
   var currentCtx = null;
   var pages = {};
+  var stopLive = null;
+  var stopUnread = null;
 
   function t(key, params) { return TTV.I18n.t(key, params); }
   function esc(v) { return C.escape(v); }
@@ -31,7 +33,8 @@ TTV.screens = TTV.screens || {};
     user: svg('<circle cx="12" cy="8" r="3.4"/><path d="M5.5 19.5c.8-3.4 3.4-5 6.5-5s5.7 1.6 6.5 5"/>'),
     lock: svg('<rect x="5" y="10.5" width="14" height="9.5" rx="2"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/>'),
     logout: svg('<path d="M10 5H6.5A1.5 1.5 0 0 0 5 6.5v11A1.5 1.5 0 0 0 6.5 19H10"/><path d="M14 8l4 4-4 4M18 12H9.5"/>'),
-    chevron: svg('<path d="m9.5 6 6 6-6 6"/>')
+    chevron: svg('<path d="m9.5 6 6 6-6 6"/>'),
+    bell: svg('<path d="M6.5 16.5v-5a5.5 5.5 0 0 1 11 0v5l1.4 1.5H5.1z"/><path d="M10 20.5a2.2 2.2 0 0 0 4 0"/>')
   };
 
   /* ---------- Khung dùng chung ---------- */
@@ -56,7 +59,7 @@ TTV.screens = TTV.screens || {};
   }
   // Tài khoản bị khóa / bị xóa giữa chừng → đăng xuất về trang đăng nhập.
   function handleAuthLoss(err) {
-    if (err && (err.code === 'LOCKED' || err.code === 'NOT_FOUND' || err.code === 'FORBIDDEN')) {
+    if (err && err.code === 'LOCKED') {
       TTV.api.logoutAndGo().then(function () { C.toast(t('vendor.locked'), 'danger'); });
       return true;
     }
@@ -71,7 +74,14 @@ TTV.screens = TTV.screens || {};
       ? '★ ' + Number(v.rating).toFixed(1) + ' · ' + t('vendor.jobsDone', { n: Number(v.jobs_done) || 0 })
       : t('vendor.rating.none'));
     if (opts.phone && v.phone) chips.push(TTV.Utils.maskPhone(v.phone));
-    return '<header class="vendor-hero' + (opts.flat ? ' vendor-hero--flat' : '') + '"><div class="vendor-hero__row">' +
+    var unread = TTV.NotiLive ? TTV.NotiLive.unread() : 0;
+    return '<header class="vendor-hero' + (opts.flat ? ' vendor-hero--flat' : '') + '">' +
+      '<div class="vendor-hero__top">' +
+        '<button type="button" class="vendor-hero__bell" data-route="/vendor/notifications" aria-label="' + esc(t('vendor.notifications')) + '">' +
+          ICONS.bell + TTV.Utils.unreadBadge(unread) +
+        '</button>' +
+      '</div>' +
+      '<div class="vendor-hero__row">' +
       C.avatar(v.name, v.avatar_path, { size: 'lg' }) +
       '<div class="vendor-hero__text">' +
         (opts.greeting ? '<p class="vendor-hero__greet">' + esc(t(greetingKey())) + '</p>' : '') +
@@ -106,16 +116,47 @@ TTV.screens = TTV.screens || {};
       '</section>' +
       (blocked ? C.notice(t('vendor.ready.blocked', { limit: vnd(Math.abs(d.readiness.limit)) }), t('vendor.ready.blockedTitle')) : '');
   }
-  function statTile(label, value, route) {
-    var inner = '<b>' + esc(value) + '</b><span>' + esc(label) + '</span>';
+  function statTile(label, value, route, key) {
+    var inner = '<b' + (key ? ' data-vendor-stat="' + key + '"' : '') + '>' + esc(value) + '</b><span>' + esc(label) + '</span>';
     return route
       ? '<button type="button" class="vendor-stat" data-route="' + esc(route) + '">' + inner + '</button>'
       : '<div class="vendor-stat">' + inner + '</div>';
+  }
+  function crewHint(crew) {
+    if (!crew) return '';
+    if (crew.status === 'full') return t('vendor.crew.hint.full');
+    if (crew.status === 'partial') return t('vendor.crew.hint.partial', { n: crew.free });
+    return t('vendor.crew.hint.idle', { n: crew.size });
+  }
+  function crewMarkup(crew) {
+    if (!crew) return '';
+    var pct = crew.size ? Math.round(100 * crew.busy / crew.size) : 0;
+    return '<section class="vendor-crew" id="vendor-crew" data-status="' + esc(crew.status) + '">' +
+      '<div class="vendor-crew__head">' +
+        '<strong>' + esc(t('vendor.crew.title.' + crew.kind)) + '</strong>' +
+        '<span class="vendor-crew__badge">' + esc(t('vendor.crew.status.' + crew.status)) + '</span>' +
+      '</div>' +
+      '<div class="vendor-crew__bar" aria-hidden="true"><i style="width:' + pct + '%"></i></div>' +
+      '<div class="vendor-crew__nums">' +
+        '<div><b>' + esc(String(crew.size)) + '</b><span>' + esc(t('vendor.crew.size')) + '</span></div>' +
+        '<div><b>' + esc(String(crew.busy)) + '</b><span>' + esc(t('vendor.crew.busy')) + '</span></div>' +
+        '<div><b>' + esc(String(crew.free)) + '</b><span>' + esc(t('vendor.crew.free')) + '</span></div>' +
+      '</div>' +
+      '<p class="vendor-crew__hint">' + esc(crewHint(crew)) + '</p>' +
+    '</section>';
+  }
+  function paintCrew(crew) {
+    var box = document.getElementById('vendor-crew');
+    if (!box) return;
+    var wrap = document.createElement('div');
+    wrap.innerHTML = crewMarkup(crew);
+    if (wrap.firstChild) box.replaceWith(wrap.firstChild);
   }
   function homeMarkup(d) {
     return '<div class="vendor vendor-home">' +
       heroMarkup(d.vendor, { greeting: true }) +
       readyMarkup(d) +
+      crewMarkup(d.crew) +
       '<div class="vendor-section"><h2>' + esc(t('vendor.home.today')) + '</h2><span>' + esc(TTV.Utils.date(d.today.date)) + '</span></div>' +
       '<div class="vendor-stats">' +
         statTile(t('vendor.stat.completed'), String(d.today.completed)) +
@@ -123,8 +164,8 @@ TTV.screens = TTV.screens || {};
       '</div>' +
       '<div class="vendor-section"><h2>' + esc(t('vendor.home.ongoing')) + '</h2></div>' +
       '<div class="vendor-stats">' +
-        statTile(t('vendor.stat.quotes'), String(d.ongoing.pendingQuotes)) +
-        statTile(t('vendor.stat.jobs'), String(d.ongoing.activeJobs), '/vendor/jobs') +
+        statTile(t('vendor.stat.quotes'), String(d.ongoing.pendingQuotes), '', 'quotes') +
+        statTile(t('vendor.stat.jobs'), String(d.ongoing.activeJobs), '/vendor/jobs', 'jobs') +
       '</div>' +
       '<div class="vendor-cta"><button type="button" class="btn btn-primary btn-block" data-route="/vendor/market">' + esc(t('vendor.home.cta')) + '</button></div>' +
       tabBar('home') +
@@ -140,6 +181,19 @@ TTV.screens = TTV.screens || {};
       root.innerHTML = homeMarkup(d);
       bindAvatarFallback(root, d.vendor.name);
       bindCommon();
+      stopUnread = TTV.Utils.watchUnread(root);
+      if (TTV.Live && TTV.Live.watch) {
+        stopLive = TTV.Live.watch('orders', function () {
+          TTV.api.getVendorDashboard().then(function (next) {
+            if (currentView !== 'home') return;
+            var q = root.querySelector('[data-vendor-stat="quotes"]');
+            var j = root.querySelector('[data-vendor-stat="jobs"]');
+            if (q) q.textContent = String(next.ongoing.pendingQuotes);
+            if (j) j.textContent = String(next.ongoing.activeJobs);
+            if (next.crew) paintCrew(next.crew);
+          }).catch(function () {});
+        }, { immediate: false });
+      }
     }).catch(function (err) {
       if (my !== token) return;
       if (handleAuthLoss(err)) return;
@@ -176,10 +230,16 @@ TTV.screens = TTV.screens || {};
     currentView = id; currentCtx = ctx || null;
     ++token;
     var root = app();
-    root.innerHTML = '<div class="vendor">' + C.header(t('vendor.tab.' + id), { back: false }) +
+    var unread = TTV.NotiLive ? TTV.NotiLive.unread() : 0;
+    root.innerHTML = '<div class="vendor">' +
+      '<header class="app-header"><h1>' + esc(t('vendor.tab.' + id)) + '</h1>' +
+        '<button type="button" class="app-header__action vendor-hero__bell" data-route="/vendor/notifications" aria-label="' + esc(t('vendor.notifications')) + '">' +
+          ICONS.bell + TTV.Utils.unreadBadge(unread) +
+        '</button></header>' +
       '<main class="vendor-main" id="vendor-page"></main>' + tabBar(id) + '</div>';
     var box = root.querySelector('#vendor-page'), page = pages[id];
     bindCommon();
+    stopUnread = TTV.Utils.watchUnread(root);
     if (page && typeof page.render === 'function') { activePage = page; page.render(box, ctx); }
     else box.innerHTML = C.emptyState(t('vendor.' + id + '.soon'), t('vendor.' + id + '.soon.desc'), { icon: id === 'market' ? '▤' : '☑' });
   }
@@ -187,6 +247,7 @@ TTV.screens = TTV.screens || {};
   /* ---------- Tab Cá nhân ---------- */
   var MENU = [
     { title: 'vendor.profile.section.activity', items: [
+      { icon: 'bell', label: 'vendor.notifications', route: '/vendor/notifications' },
       { icon: 'quote', label: 'vendor.profile.quotes', route: '/vendor/quotes' },
       { icon: 'wallet', label: 'vendor.profile.wallet', route: '/vendor/wallet' },
       { icon: 'withdraw', label: 'vendor.profile.withdraw', route: '/vendor/withdrawals' },
@@ -225,6 +286,7 @@ TTV.screens = TTV.screens || {};
       root.innerHTML = profileMarkup(v);
       bindAvatarFallback(root, v.name);
       bindCommon();
+      stopUnread = TTV.Utils.watchUnread(root);
     }).catch(function (err) {
       if (my !== token) return;
       if (handleAuthLoss(err)) return;
@@ -268,6 +330,8 @@ TTV.screens = TTV.screens || {};
   }
   function destroyAll() {
     token++; // vô hiệu mọi callback đang chờ
+    if (stopLive) { stopLive(); stopLive = null; }
+    if (stopUnread) { stopUnread(); stopUnread = null; }
     if (docHandler) { document.removeEventListener('click', docHandler); docHandler = null; }
     if (activePage && typeof activePage.destroy === 'function') { try { activePage.destroy(); } catch (_) {} }
     activePage = null;
@@ -282,6 +346,12 @@ TTV.screens = TTV.screens || {};
 
   var opts = { roles: ['VENDOR'], loginRoute: '/staff-login', deniedRoute: '/staff-login', destroy: destroyAll };
   TTV.Router.add('/vendor', renderHome, opts);
+  TTV.Router.add('/vendor/notifications', function () {
+    destroyAll();
+    TTV.screens.notifications.render(app());
+  }, { roles: ['VENDOR'], loginRoute: '/staff-login', deniedRoute: '/staff-login', destroy: function () {
+    TTV.screens.notifications.destroy();
+  } });
   TTV.Router.add('/vendor/market', function (ctx) { renderTab('market', ctx); }, opts);
   TTV.Router.add('/vendor/jobs', function (ctx) { renderTab('jobs', ctx); }, opts);
   TTV.Router.add('/vendor/profile', renderProfile, opts);

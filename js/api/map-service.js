@@ -90,6 +90,24 @@ window.TTV = window.TTV || {};
           return openMeteo();
         });
     },
+    // Đường đi theo đường bộ (OSRM). Lỗi mạng thì trả đường thẳng 2 điểm.
+    routeLine: function (from, to) {
+      var straight = [[Number(from.lat), Number(from.lng)], [Number(to.lat), Number(to.lng)]];
+      if (from.lat == null || from.lng == null || to.lat == null || to.lng == null) {
+        return Promise.resolve(straight);
+      }
+      var url = 'https://router.project-osrm.org/route/v1/driving/' +
+        Number(from.lng) + ',' + Number(from.lat) + ';' + Number(to.lng) + ',' + Number(to.lat) +
+        '?overview=full&geometries=geojson';
+      return fetch(url).then(function (res) {
+        if (!res.ok) throw new Error('route');
+        return res.json();
+      }).then(function (data) {
+        var coords = data && data.routes && data.routes[0] && data.routes[0].geometry && data.routes[0].geometry.coordinates;
+        if (!coords || !coords.length) return straight;
+        return coords.map(function (c) { return [c[1], c[0]]; });
+      }).catch(function () { return straight; });
+    },
     reverse: function (lat, lng) {
       return photon('reverse', { lon: lng, lat: lat }).then(function (data) {
         var row = featuresToPlaces(data)[0];

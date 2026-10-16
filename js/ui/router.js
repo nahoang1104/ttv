@@ -32,6 +32,18 @@ window.TTV = window.TTV || {};
     if (options.replace && location.replace) location.replace(location.pathname + location.search + hash);
     else location.hash = hash;
   }
+  var AFTER_PLACE = 'ttv_after_place';
+  function markAfterPlace(orderId) {
+    try { sessionStorage.setItem(AFTER_PLACE, String(orderId || '')); } catch (_) {}
+  }
+  function consumeAfterPlace(orderId) {
+    try {
+      var cur = sessionStorage.getItem(AFTER_PLACE);
+      if (!cur || String(cur) !== String(orderId || '')) return false;
+      sessionStorage.removeItem(AFTER_PLACE);
+      return true;
+    } catch (_) { return false; }
+  }
 
   /* ===== Guard theo vai trò (task 2.5) =====
      Mỗi khu vực khai báo tiền tố route + vai trò được vào + trang đăng nhập tương ứng.
@@ -116,6 +128,7 @@ window.TTV = window.TTV || {};
     },
     stop: function () { if (started) window.removeEventListener('hashchange', render); started = false; },
     render: render, navigate: navigate, parse: parseHash,
+    markAfterPlace: markAfterPlace, consumeAfterPlace: consumeAfterPlace,
     has: function (path) { for (var i = 0; i < routes.length; i++) if (match(routes[i].path, path)) return true; return false; },
     checkAccess: checkAccess, homeFor: homeFor, areaOf: areaOf,
     render404: function (ctx) { var app = document.getElementById('app'); var back = homeFor(currentSession()); if (app) app.innerHTML = '<main class="page page-center"><div class="empty-state"><div class="empty-state__icon">⌕</div><h2>Không tìm thấy trang</h2><p>Đường dẫn này không tồn tại hoặc đã được thay đổi.</p><button class="btn btn-primary" data-route="' + back + '">Về trang chủ</button></div></main>'; }
