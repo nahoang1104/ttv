@@ -15,12 +15,6 @@ window.TTV = window.TTV || {};
 
   function cfg() { return window.TTV_CONFIG || {}; }
   function isKio() { return cfg().mode === 'kio'; }
-  function hasKioRuntime() {
-    return !!(typeof KioStore !== 'undefined' && KioStore &&
-      typeof KioStore.listCollection === 'function' &&
-      typeof KioStore.syncCollection === 'function' &&
-      typeof KioStore.appendCollection === 'function');
-  }
   function prefix() {
     var p = String(cfg().prefix || 'ttv_').toLowerCase().replace(/[^a-z0-9_]/g, '');
     if (!p) p = 'ttv_';
@@ -230,25 +224,7 @@ window.TTV = window.TTV || {};
     }
   };
 
-  function resolveStore() {
-    if (isKio() && hasKioRuntime()) return kioStore;
-    if (isKio() && !hasKioRuntime()) {
-      console.warn('[TTV] KIO không khả dụng, chuyển sang IndexedDB local.');
-      cfg().mode = 'local';
-    }
-    return localStore;
-  }
-
-  var store = resolveStore();
-  TTV.localStore = localStore;
-  TTV.kioStore = kioStore;
+  var store = isKio() ? kioStore : localStore;
   TTV.Store = store;
   TTV.store = store;
-  TTV.switchToLocal = function () {
-    TTV.config = TTV.config || window.TTV_CONFIG || {};
-    TTV.config.mode = 'local';
-    TTV.Store = localStore;
-    TTV.store = localStore;
-    return TTV.Store;
-  };
 })(window.TTV);

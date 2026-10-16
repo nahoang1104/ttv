@@ -3,24 +3,12 @@ window.TTV = window.TTV || {};
 TTV.config = window.TTV_CONFIG;
 
 // Chuẩn bị DB và nạp seed một lần trước khi điều hướng.
-TTV.ready = Promise.resolve().then(function () {
-  return TTV.Store.ready();
-}).then(function () { return TTV.Seed.run(); }).then(function (result) { return TTV.api.ensureSeedStaff().catch(function (e) { console.warn("[TTV] ensureSeedStaff:", e); }).then(function () { return result; }); }).then(function (result) {
+TTV.ready = TTV.Store.ready().then(function () { return TTV.Seed.run(); }).then(function (result) { return TTV.api.ensureSeedStaff().catch(function (e) { console.warn("[TTV] ensureSeedStaff:", e); }).then(function () { return result; }); }).then(function (result) {
   TTV.seedResult = result;
   return result;
 }).catch(function (error) {
-  var msg = String(error && error.message ? error.message : error || '');
-  var isKioFailure = TTV.config && TTV.config.mode === 'kio' && /Failed to fetch|ERR_FAILED|CORS|fetch/i.test(msg);
-  if (isKioFailure && TTV.localStore) {
-    console.warn('[TTV] KIO không khả dụng, chuyển sang IndexedDB local.');
-    TTV.switchToLocal();
-    return TTV.Store.ready().then(function () { return TTV.Seed.run(); }).then(function (result) { return TTV.api.ensureSeedStaff().catch(function (e) { console.warn("[TTV] ensureSeedStaff:", e); }).then(function () { return result; }); }).then(function (result) {
-      TTV.seedResult = result;
-      return result;
-    });
-  }
   console.error('[TTV] Không thể khởi tạo dữ liệu:', error);
-  TTV.Components && TTV.Components.toast('Không khởi tạo được dữ liệu: ' + msg, 'danger');
+  TTV.Components && TTV.Components.toast('Không khởi tạo được dữ liệu: ' + error.message, 'danger');
   throw error;
 });
 
@@ -66,7 +54,9 @@ TTV.ready = Promise.resolve().then(function () {
   TTV.Router.add('/notifications', function () {
     TTV.screens.notifications.render(document.getElementById('app'));
   }, { roles: ['CUSTOMER'], loginRoute: '/login', deniedRoute: '/login', destroy: function () { TTV.screens.notifications.destroy(); } });
-  TTV.Router.add('/coupons', stub('Mã giảm giá', 'home'), { roles: ['CUSTOMER'], loginRoute: '/login', deniedRoute: '/login' });
+  TTV.Router.add('/coupons', function () {
+    TTV.screens.coupons.render(document.getElementById('app'));
+  }, { roles: ['CUSTOMER'], loginRoute: '/login', deniedRoute: '/login', destroy: function () { TTV.screens.coupons.destroy(); } });
   TTV.Router.add('/wallet/history', function () {
     TTV.screens.wallet.renderHistory(document.getElementById('app'));
   }, { roles: ['CUSTOMER'], loginRoute: '/login', deniedRoute: '/login', destroy: function () { TTV.screens.wallet.destroy(); } });
@@ -113,8 +103,7 @@ TTV.ready = Promise.resolve().then(function () {
   });
   document.addEventListener('click', function(e){var tab=e.target.closest('[data-tab]');if(tab){tab.parentElement.querySelectorAll('[data-tab]').forEach(function(t){t.classList.toggle('is-active',t===tab);t.setAttribute('aria-selected',t===tab?'true':'false');});}});
 
-  TTV.ready.then(function () { return TTV.api.validateSession(); }).then(function () { TTV.Router.start(); }).catch(function (error) {
-    console.error('[TTV] Khởi tạo app thất bại:', error);
+  TTV.ready.then(function () { return TTV.api.validateSession(); }).then(function () { TTV.Router.start(); }).catch(function () {
     document.getElementById('app').innerHTML = '<main class="page"><h2>Không thể khởi tạo ứng dụng</h2><p>Hãy tải lại trang. Nếu lỗi tiếp tục, kiểm tra quyền IndexedDB hoặc chế độ duyệt riêng tư.</p></main>';
   });
 })(window.TTV);

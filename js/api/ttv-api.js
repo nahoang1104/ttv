@@ -135,6 +135,7 @@ window.TTV = window.TTV || {};
         return TTV.Store.query('users', { phone: c.phone });
       }).then(function (rows) {
         var user = rows[0], isNew = !user;
+        if (user && user.status === 'locked') { writeChallenge(null); throw fail('ACCOUNT_LOCKED', 'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ hỗ trợ.'); }
         return (isNew ? TTV.Store.put('users', newUser({ phone: c.phone, login_method: 'phone' })) : Promise.resolve(user)).then(function (u) {
           writeChallenge(null);
           return startCustomerSession(u, isNew);
@@ -147,6 +148,7 @@ window.TTV = window.TTV || {};
     if (method !== 'zalo' && method !== 'google') return Promise.reject(fail('INVALID_METHOD', 'Phương thức đăng nhập không hợp lệ.'));
     var id = 'demo-' + method;
     return TTV.Store.get('users', id).then(function (existing) {
+      if (existing && existing.status === 'locked') throw fail('ACCOUNT_LOCKED', 'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ hỗ trợ.');
       var isNew = !existing;
       return (isNew ? TTV.Store.put('users', newUser({ id: id, login_method: method })) : Promise.resolve(existing)).then(function (u) {
         writeChallenge(null);
@@ -2240,6 +2242,415 @@ window.TTV = window.TTV || {};
       else if (tab === 'refund') list = list.filter(function (x) { return x.type === 'refund'; });
       if (opts.limit != null) list = list.slice(0, Math.max(0, Number(opts.limit) || 0));
       return list;
+    });
+  };
+
+  /* ===== 7.4 Mã giảm giá (khách) ===== */
+  function publicCoupon(c, extra) {
+    var out = {
+      code: String(c.code || c.id || ''),
+      title: String(c.title || c.code || ''),
+      condition: String(c.condition || ''),
+      min_workers: Math.max(1, Math.round(Number(c.min_workers) || 2)),
+      discount_type: c.discount_type === 'fixed' ? 'fixed' : 'percent',
+      discount_value: Number(c.discount_value) || 0,
+      max_discount: Number(c.max_discount) || 0,
+      min_order: Number(c.min_order) || 0,
+      expires_at: c.expires_at || ''
+    };
+    if (extra) Object.keys(extra).forEach(function (k) { out[k] = extra[k]; });
+    return out;
+  }
+  function couponExpired(c, now) {
+    var exp = c && c.expires_at ? new Date(c.expires_at).getTime() : NaN;
+    return !!c && (c.status === 'expired' || (isFinite(exp) && exp < (now == null ? Date.now() : now)));
+  }
+  function userCouponId(uid, code) { return 'uc-' + String(uid) + '-' + String(code); }
+  function normalizeCouponCode(v) { return String(v == null ? '' : v).replace(/\s+/g, '').toUpperCase(); }
+
+  // 3 tab Khả dụng / Đã dùng / Hết hạn. Mã hết hạn của hệ thống luôn hiện ở tab Hết hạn (đúng ảnh 10-ma-giam-gia-2).
+  api.listMyCoupons = function () {
+    var s = customerSession();
+    if (!s) return Promise.reject(fail('UNAUTH', 'Hãy đăng nhập.'));
+    var uid = String(s.account_id), now = Date.now();
+    return Promise.all([
+      TTV.Store.list('coupons'),
+      TTV.Store.query('user_coupons', function (r) { return String(r.user_id) === uid; })
+    ]).then(function (res) {
+      var byCode = {};
+      (res[0] || []).forEach(function (c) { byCode[String(c.code || c.id)] = c; });
+      var out = { available: [], used: [], expired: [] }, seen = {};
+      (res[1] || []).forEach(function (uc) {
+        var code = String(uc.coupon_code), c = byCode[code];
+        if (!c || seen[code]) return;
+        seen[code] = true;
+        if (uc.status === 'used') out.used.push(publicCoupon(c, { used_order_id: uc.used_order_id || '' }));
+        else if (uc.status === 'expired' || couponExpired(c, now)) out.expired.push(publicCoupon(c));
+        else out.available.push(publicCoupon(c));
+      });
+      Object.keys(byCode).forEach(function (code) {
+        if (!seen[code] && couponExpired(byCode[code], now)) out.expired.push(publicCoupon(byCode[code]));
+      });
+      var byExp = function (a, b) { return String(a.expires_at).localeCompare(String(b.expires_at)); };
+      out.available.sort(byExp);
+      out.expired.sort(function (a, b) { return byExp(b, a); });
+      return out;
+    });
+  };
+
+  // Nhập mã → thêm vào ví mã của khách (user_coupons). Mỗi khách giữ 1 dòng cho mỗi mã.
+  api.claimCoupon = function (rawCode) {
+    var s = customerSession();
+    if (!s) return Promise.reject(fail('UNAUTH', 'Hãy đăng nhập.'));
+    var code = normalizeCouponCode(rawCode), uid = String(s.account_id);
+    if (!code) return Promise.reject(fail('COUPON_EMPTY', 'Hãy nhập mã giảm giá.'));
+    return TTV.Store.get('coupons', code).then(function (c) {
+      if (!c) throw fail('COUPON_NOT_FOUND', 'Mã giảm giá không tồn tại.');
+      if (couponExpired(c)) throw fail('COUPON_EXPIRED', 'Mã giảm giá đã hết hạn.');
+      var id = userCouponId(uid, code);
+      return TTV.Store.get('user_coupons', id).then(function (uc) {
+        if (uc && uc.status === 'used') throw fail('COUPON_USED', 'Bạn đã dùng mã này rồi.');
+        if (uc && uc.status === 'available') throw fail('COUPON_OWNED', 'Mã này đã có trong danh sách của bạn.');
+        var row = { id: id, user_id: uid, coupon_code: code, status: 'available', used_order_id: '', created_at: new Date().toISOString() };
+        return TTV.Store.put('user_coupons', row).then(function () { return publicCoupon(c); });
+      });
+    });
+  };
+
+  // Kiểm tra mã dùng được cho đơn (số tiền, số thợ). Quy tắc nằm trong pricing.js; đơn 1 thợ bị từ chối kèm lý do.
+  api.checkCoupon = function (rawCode, amount, workers) {
+    var code = normalizeCouponCode(rawCode);
+    return Promise.all([TTV.pricing.ready(), TTV.Store.get('coupons', code)]).then(function (res) {
+      var r = TTV.pricing.applyCoupon(amount, res[1], workers);
+      if (res[1]) r.coupon = publicCoupon(res[1]);
+      return r;
+    });
+  };
+
+  // Đánh dấu mã đã dùng cho một đơn (nối vào luồng chọn thợ/thanh toán ở task sau).
+  api.markCouponUsed = function (rawCode, orderId) {
+    var s = customerSession();
+    if (!s) return Promise.reject(fail('UNAUTH', 'Hãy đăng nhập.'));
+    var id = userCouponId(s.account_id, normalizeCouponCode(rawCode));
+    return TTV.Store.get('user_coupons', id).then(function (uc) {
+      if (!uc) throw fail('COUPON_NOT_OWNED', 'Bạn chưa có mã này.');
+      if (uc.status === 'used') throw fail('COUPON_USED', 'Mã này đã được dùng.');
+      return TTV.Store.put('user_coupons', Object.assign({}, uc, { status: 'used', used_order_id: String(orderId || ''), used_at: new Date().toISOString() }));
+    });
+  };
+
+  /* ===== 3.7 Nhật ký hoạt động (audit_logs) — chỉ SUPER_ADMIN, chỉ đọc ===== */
+  var AUDIT_SECRET_KEY = /pass|salt|hash|otp|token|secret/i; // phòng thủ: không bao giờ trả khóa nhạy cảm ra màn hình
+  function scrubAudit(v) {
+    if (Array.isArray(v)) return v.map(scrubAudit);
+    if (v && typeof v === 'object') {
+      var out = {};
+      Object.keys(v).forEach(function (k) { if (!AUDIT_SECRET_KEY.test(k)) out[k] = scrubAudit(v[k]); });
+      return out;
+    }
+    return v;
+  }
+  function parseAuditDetail(raw) {
+    if (raw == null || raw === '') return null;
+    if (typeof raw !== 'string') return scrubAudit(raw);
+    try { return scrubAudit(JSON.parse(raw)); } catch (_) { return raw; }
+  }
+  function auditGroupOf(action) {
+    var g = String(action || '').split('.')[0];
+    return g === 'auth' || g === 'vendor' || g === 'settings' || g === 'customer' ? g : 'other';
+  }
+  api.AUDIT_GROUPS = ['auth', 'vendor', 'customer', 'settings'];
+  // Trả mọi dòng nhật ký, mới nhất trước. Kèm actor_name (tra bảng staff/vendors), group, detail đã parse + loại khóa nhạy cảm.
+  api.listAuditLogs = function () {
+    var err = adminGuard('Bạn không có quyền xem nhật ký hoạt động.');
+    if (err) return Promise.reject(err);
+    if (TTV.Store.invalidate) { try { TTV.Store.invalidate(['audit_logs']); } catch (_) {} } // KIO cache 30 giây: luôn lấy bản mới
+    return Promise.all([TTV.Store.list('audit_logs'), TTV.Store.list('staff'), TTV.Store.list('vendors')]).then(function (r) {
+      var names = {};
+      (r[1] || []).forEach(function (x) { names[String(x.id)] = x.name || x.username || ''; });
+      (r[2] || []).forEach(function (x) { if (names[String(x.id)] == null) names[String(x.id)] = x.name || x.username || ''; });
+      return (r[0] || []).map(function (x) {
+        var actorId = String(x.actor_id == null ? '' : x.actor_id);
+        return {
+          id: String(x.id), action: String(x.action || ''), group: auditGroupOf(x.action),
+          actor_id: actorId, actor_role: String(x.actor_role || ''), actor_name: names[actorId] || '',
+          target_table: String(x.target_table || ''), target_id: String(x.target_id == null ? '' : x.target_id),
+          detail: parseAuditDetail(x.detail), created_at: x.created_at || ''
+        };
+      }).sort(function (a, b) {
+        if (a.created_at !== b.created_at) return a.created_at < b.created_at ? 1 : -1;
+        return a.id < b.id ? 1 : -1;
+      });
+    });
+  };
+
+  /* ===== 8.1 Quản lý khách (admin) ===== */
+  // Chỉ SUPER_ADMIN. Ví: cộng/trừ thủ công bắt buộc lý do, ghi wallet_transactions (method 'admin') + audit. Khóa: chặn đăng nhập OTP/demo + hủy phiên.
+  var WALLET_ADJUST_MAX = 50000000;
+  function publicCustomer(u) {
+    if (!u) return null;
+    return {
+      id: String(u.id), phone: u.phone || '', name: u.name || '', email: u.email || '', gender: u.gender || '', dob: u.dob || '',
+      avatar_path: u.avatar_path || '', login_method: u.login_method || 'phone', kyc_status: u.kyc_status || 'none',
+      wallet_balance: Number(u.wallet_balance) || 0, status: u.status === 'locked' ? 'locked' : 'active',
+      locked_at: u.locked_at || null, lock_reason: u.lock_reason || '', created_at: u.created_at || ''
+    };
+  }
+  function notFoundCustomer() { return fail('NOT_FOUND', 'Không tìm thấy khách hàng.'); }
+  function cleanReason(v) { return String(v == null ? '' : v).trim().replace(/\s+/g, ' '); }
+
+  api.listCustomers = function () {
+    var err = adminGuard('Bạn không có quyền xem danh sách khách hàng.');
+    if (err) return Promise.reject(err);
+    return Promise.all([TTV.Store.list('users'), TTV.Store.list('orders')]).then(function (r) {
+      var count = {};
+      (r[1] || []).forEach(function (o) { var k = String(o.user_id); count[k] = (count[k] || 0) + 1; });
+      return (r[0] || []).map(function (u) {
+        var c = publicCustomer(u); c.orders_count = count[c.id] || 0; return c;
+      }).sort(function (a, b) {
+        if (a.created_at !== b.created_at) return a.created_at < b.created_at ? 1 : -1;
+        return String(a.name).localeCompare(String(b.name), 'vi');
+      });
+    });
+  };
+
+  // Hồ sơ + đơn + ví (giao dịch gần đây) + địa chỉ + thiết bị đăng nhập. Chỉ đọc, không sửa đơn (không tự hủy đơn hết hạn).
+  api.getCustomer = function (id) {
+    var err = adminGuard('Bạn không có quyền xem hồ sơ khách hàng.');
+    if (err) return Promise.reject(err);
+    id = String(id);
+    return TTV.Store.get('users', id).then(function (u) {
+      if (!u) return null;
+      return Promise.all([
+        TTV.Store.query('orders', function (o) { return String(o.user_id) === id; }),
+        TTV.Store.query('wallet_transactions', function (t) { return String(t.user_id) === id; }),
+        TTV.Store.query('addresses', function (a) { return String(a.user_id) === id; }),
+        TTV.Store.query('sessions', function (x) { return x.account_type === 'customer' && String(x.account_id) === id; }),
+        TTV.Store.list('services')
+      ]).then(function (r) {
+        var names = {};
+        (r[4] || []).forEach(function (x) { names[x.code || x.id] = x.name; });
+        var byNew = function (a, b) { return String(b.created_at || '').localeCompare(String(a.created_at || '')); };
+        var orders = (r[0] || []).slice().sort(byNew).map(function (o) {
+          return {
+            id: String(o.id), code: TTV.Utils.orderCode(o.id), service: o.service || '', service_name: names[o.service] || o.service || '',
+            status: o.status || '', user_offer: Number(o.user_offer) || 0, final_price: o.final_price == null ? null : Number(o.final_price),
+            pay_method: o.pay_method || '', workers: Number(o.workers) || 1, created_at: o.created_at || '',
+            pickup: (o.pickup && o.pickup.addr) || '', dropoff: (o.dropoff && o.dropoff.addr) || ''
+          };
+        });
+        var txs = (r[1] || []).slice().sort(byNew).map(function (t) {
+          return { id: String(t.id), type: t.type || '', amount: Number(t.amount) || 0, method: t.method || '', status: t.status || '', note: t.note || '', created_at: t.created_at || '' };
+        });
+        var addresses = (r[2] || []).map(function (a) {
+          return { id: String(a.id), label: a.label || '', type: a.type || 'other', detail: a.detail || '', contact_name: a.contact_name || '', contact_phone: a.contact_phone || '', is_default: !!a.is_default };
+        }).sort(function (a, b) { return (b.is_default ? 1 : 0) - (a.is_default ? 1 : 0); });
+        var devices = (r[3] || []).map(function (x) {
+          return { id: String(x.id), device_name: x.device_name || '', platform: x.platform || '', last_active: x.last_active || '', created_at: x.created_at || '' };
+        }).sort(function (a, b) { return String(b.last_active).localeCompare(String(a.last_active)); });
+        var done = orders.filter(function (o) { return o.status === 'completed'; }).length;
+        var active = orders.filter(function (o) { return o.status !== 'completed' && o.status !== 'cancelled'; }).length;
+        return { customer: publicCustomer(u), orders: orders, transactions: txs, addresses: addresses, devices: devices, stats: { orders: orders.length, completed: done, active: active } };
+      });
+    });
+  };
+
+  // Khóa / mở khóa. Khóa: chặn đăng nhập, hủy các phiên. Gọi lại khi đã đúng trạng thái thì không ghi.
+  api.setCustomerStatus = function (id, status, reason) {
+    var err = adminGuard('Bạn không có quyền khóa hoặc mở khóa khách hàng.');
+    if (err) return Promise.reject(err);
+    if (status !== 'locked' && status !== 'active') return Promise.reject(fail('VALIDATION', 'Trạng thái không hợp lệ.'));
+    reason = cleanReason(reason);
+    if (reason.length > 200) return Promise.reject(fail('VALIDATION', 'Lý do tối đa 200 ký tự.'));
+    return TTV.Store.get('users', String(id)).then(function (row) {
+      if (!row) throw notFoundCustomer();
+      if ((row.status === 'locked' ? 'locked' : 'active') === status) return row;
+      var now = new Date().toISOString(), saved = Object.assign({}, row, { status: status, updated_at: now });
+      if (status === 'locked') { saved.locked_at = now; saved.lock_reason = reason; } else { saved.locked_at = null; saved.lock_reason = ''; }
+      return TTV.Store.put('users', saved).then(function (u) {
+        var after = status === 'locked' ? dropAccountSessions('customer', u.id) : Promise.resolve();
+        return after.then(function () {
+          return auditSafe(status === 'locked' ? 'customer.lock' : 'customer.unlock', { target_table: 'users', target_id: u.id, detail: { name: u.name, reason: reason } });
+        }).then(function () { return u; });
+      });
+    }).then(publicCustomer);
+  };
+
+  // Cộng / trừ ví thủ công. input = { direction:'in'|'out', amount, reason }. Lý do bắt buộc (3–200 ký tự); trừ không làm ví âm.
+  api.adjustCustomerWallet = function (id, input) {
+    var err = adminGuard('Bạn không có quyền chỉnh ví khách hàng.');
+    if (err) return Promise.reject(err);
+    input = input || {};
+    var errors = {}, dir = input.direction === 'out' ? 'out' : (input.direction === 'in' ? 'in' : '');
+    var raw = String(input.amount == null ? '' : input.amount).replace(/[.\s,]/g, ''), amount = /^\d+$/.test(raw) ? Number(raw) : NaN;
+    var reason = cleanReason(input.reason);
+    if (!dir) errors.direction = 'Chọn cộng hoặc trừ tiền.';
+    if (!isFinite(amount) || amount < 1000) errors.amount = 'Số tiền tối thiểu 1.000đ (số nguyên).';
+    else if (amount > WALLET_ADJUST_MAX) errors.amount = 'Số tiền tối đa ' + TTV.Utils.money(WALLET_ADJUST_MAX) + ' mỗi lần.';
+    if (reason.length < 3) errors.reason = 'Lý do bắt buộc (ít nhất 3 ký tự).';
+    else if (reason.length > 200) errors.reason = 'Lý do tối đa 200 ký tự.';
+    if (Object.keys(errors).length) return Promise.reject(fail('VALIDATION', 'Thông tin chưa hợp lệ.', { errors: errors }));
+    var admin = TTV.auth.getSession();
+    return TTV.Store.get('users', String(id)).then(function (row) {
+      if (!row) throw notFoundCustomer();
+      return TTV.Store.get('users', row.id); // đọc lại ngay trước khi ghi
+    }).then(function (fresh) {
+      if (!fresh) throw notFoundCustomer();
+      var before = Number(fresh.wallet_balance) || 0, after = dir === 'in' ? before + amount : before - amount;
+      if (after < 0) throw fail('INSUFFICIENT', 'Số dư ví không đủ để trừ (hiện ' + TTV.Utils.money(before) + ').', { errors: { amount: 'Vượt quá số dư ví hiện tại.' } });
+      var now = new Date().toISOString();
+      return TTV.Store.put('users', Object.assign({}, fresh, { wallet_balance: after, updated_at: now })).then(function (u) {
+        var tx = { id: TTV.Utils.id(), user_id: String(u.id), type: dir === 'in' ? 'topup' : 'payment', amount: amount, method: 'admin', status: 'success', order_id: '', note: reason, adjusted_by: admin.account_id, created_at: now };
+        return TTV.Store.put('wallet_transactions', tx).then(function () {
+          return auditSafe('customer.wallet_adjust', { target_table: 'users', target_id: u.id, detail: { name: u.name, direction: dir, amount: amount, balance_before: before, balance_after: after, reason: reason } });
+        }).then(function () {
+          background(api.pushNotification({ event: 'wallet.adjust', category: 'system', title: dir === 'in' ? 'Ví được cộng ' + TTV.Utils.money(amount) : 'Ví bị trừ ' + TTV.Utils.money(amount), body: 'Lý do: ' + reason, recipient_type: 'customer', recipient_id: String(u.id), href: '/wallet/history' }));
+          return { customer: publicCustomer(u), transaction: tx };
+        });
+      });
+    });
+  };
+
+  // Reset thiết bị: xóa mọi phiên đăng nhập của khách (đăng xuất khỏi mọi thiết bị; phiên đang mở ở tab bị hủy ở lần tải lại).
+  api.resetCustomerDevices = function (id) {
+    var err = adminGuard('Bạn không có quyền đặt lại thiết bị khách hàng.');
+    if (err) return Promise.reject(err);
+    return TTV.Store.get('users', String(id)).then(function (u) {
+      if (!u) throw notFoundCustomer();
+      return TTV.Store.query('sessions', function (x) { return x.account_type === 'customer' && String(x.account_id) === String(u.id); }).then(function (rows) {
+        return dropAccountSessions('customer', u.id).then(function () {
+          return auditSafe('customer.reset_devices', { target_table: 'users', target_id: u.id, detail: { name: u.name, removed: (rows || []).length } });
+        }).then(function () { return { removed: (rows || []).length }; });
+      });
+    });
+  };
+
+  /* ===== 8.2 Quản lý đơn (admin) ===== */
+  // Chỉ SUPER_ADMIN, CHỈ ĐỌC (can thiệp đơn: gán thợ / đổi trạng thái / hủy làm ở 8.3). Không tự hủy đơn hết hạn: chỉ gắn cờ `overdue`.
+  api.ADMIN_ORDER_STATUSES = ['finding', 'matched', 'arriving', 'working', 'completed', 'cancelled'];
+  function pricingReadySafe() {
+    return (TTV.pricing && TTV.pricing.ready ? TTV.pricing.ready() : Promise.resolve({})).catch(function () { return {}; });
+  }
+  function orderIsOverdue(o, windowMs) {
+    if (!o || o.status !== 'finding') return false;
+    var end = quoteDeadlineMs(o, windowMs);
+    return end > 0 && Date.now() >= end;
+  }
+  function weightNameOf(id) {
+    var list = TTV.pricing && TTV.pricing.weightTiers ? TTV.pricing.weightTiers() : [], name = '';
+    list.forEach(function (w) { if (String(w.id) === String(id)) name = w.name || ''; });
+    return name;
+  }
+  function moneyOrNull(v) { return v == null || v === '' || !isFinite(Number(v)) ? null : Number(v); }
+
+  // Danh sách mọi đơn (mới nhất trước) + danh sách dịch vụ để lọc. Lọc/tìm kiếm/phân trang làm ở màn hình.
+  api.listAdminOrders = function () {
+    var err = adminGuard('Bạn không có quyền xem danh sách đơn hàng.');
+    if (err) return Promise.reject(err);
+    if (TTV.Store.invalidate) { try { TTV.Store.invalidate(['orders', 'quotes']); } catch (_) {} } // KIO cache 30 giây: luôn lấy bản mới
+    return Promise.all([
+      TTV.Store.list('orders'), TTV.Store.list('users'), TTV.Store.list('vendors'),
+      TTV.Store.list('services'), TTV.Store.list('quotes'), pricingReadySafe()
+    ]).then(function (r) {
+      var users = {}, vendors = {}, svc = {}, qTotal = {}, qPending = {};
+      (r[1] || []).forEach(function (u) { users[String(u.id)] = u; });
+      (r[2] || []).forEach(function (v) { vendors[String(v.id)] = v; });
+      (r[3] || []).forEach(function (s) { svc[s.code || s.id] = s.name || ''; });
+      (r[4] || []).forEach(function (q) {
+        var k = String(q.order_id); qTotal[k] = (qTotal[k] || 0) + 1;
+        if (q.status === 'pending') qPending[k] = (qPending[k] || 0) + 1;
+      });
+      var windowMs = TTV.pricing && TTV.pricing.quoteWindowMs ? TTV.pricing.quoteWindowMs() : 0;
+      var rows = (r[0] || []).map(function (o) {
+        var id = String(o.id), u = users[String(o.user_id)] || {}, v = o.vendor_id ? (vendors[String(o.vendor_id)] || {}) : null;
+        return {
+          id: id, code: TTV.Utils.orderCode(o.code || o.id), service: o.service || '', service_name: svc[o.service] || o.service || '',
+          status: o.status || 'finding', customer_id: String(o.user_id || ''), customer_name: u.name || '', customer_phone: u.phone || '',
+          vendor_id: o.vendor_id ? String(o.vendor_id) : '', vendor_name: v ? (v.name || '') : '',
+          pickup: placeOf(o, 'pickup').addr, dropoff: placeOf(o, 'dropoff').addr, distance_km: Number(o.distance_km) || 0,
+          workers: jobWorkers(o), speed: o.speed || 'default', pay_method: o.pay_method || '',
+          user_offer: Number(o.user_offer) || 0, final_price: moneyOrNull(o.final_price),
+          quotes_total: qTotal[id] || 0, quotes_pending: qPending[id] || 0,
+          overdue: orderIsOverdue(o, windowMs), demo: !!o.demo, created_at: o.created_at || ''
+        };
+      }).sort(function (a, b) {
+        if (a.created_at !== b.created_at) return a.created_at < b.created_at ? 1 : -1;
+        return a.id < b.id ? 1 : -1;
+      });
+      var services = (r[3] || []).map(function (s) { return { code: s.code || s.id, name: s.name || s.code || s.id }; });
+      return { orders: rows, services: services };
+    });
+  };
+
+  // Chi tiết một đơn: đơn + khách + thợ + mọi báo giá (mọi trạng thái) + timeline + nhật ký sự kiện + media. null nếu không có đơn.
+  api.getAdminOrder = function (id) {
+    var err = adminGuard('Bạn không có quyền xem chi tiết đơn hàng.');
+    if (err) return Promise.reject(err);
+    id = String(id);
+    if (TTV.Store.invalidate) { try { TTV.Store.invalidate(['orders', 'quotes', 'order_events', 'order_media']); } catch (_) {} }
+    return TTV.Store.get('orders', id, { force: true }).then(function (o) {
+      if (!o) return null;
+      var same = function (x) { return String(x.order_id) === id; };
+      return Promise.all([
+        o.user_id ? TTV.Store.get('users', String(o.user_id)) : null,
+        TTV.Store.list('vendors'), TTV.Store.list('staff'), TTV.Store.get('services', o.service),
+        TTV.Store.query('quotes', same), TTV.Store.query('order_events', same), TTV.Store.query('order_media', same), pricingReadySafe()
+      ]).then(function (r) {
+        var u = r[0], vendors = r[1] || [], vmap = {}, smap = {}, svcRow = r[3];
+        vendors.forEach(function (v) { vmap[String(v.id)] = v; });
+        (r[2] || []).forEach(function (s) { smap[String(s.id)] = s.name || s.username || ''; });
+        var windowMs = TTV.pricing && TTV.pricing.quoteWindowMs ? TTV.pricing.quoteWindowMs() : 0;
+        var pb = o.price_breakdown || {}, pick = placeOf(o, 'pickup'), drop = placeOf(o, 'dropoff');
+        var order = {
+          id: String(o.id), code: TTV.Utils.orderCode(o.code || o.id), service: o.service || '', service_name: (svcRow && svcRow.name) || o.service || '',
+          status: o.status || 'finding', created_at: o.created_at || '', matched_at: o.matched_at || '', completed_at: o.completed_at || '', cancelled_at: o.cancelled_at || '',
+          cancel_reason: o.cancel_reason || '', quote_deadline: o.quote_deadline || '', overdue: orderIsOverdue(o, windowMs), demo: !!o.demo,
+          pickup: pick, dropoff: drop, distance_km: Number(o.distance_km) || 0,
+          weight_tier: o.weight_tier || '', weight_name: weightNameOf(o.weight_tier),
+          pickup_floor: Number(o.pickup_floor) || 0, pickup_elevator: !!o.pickup_elevator, need_unload: o.need_unload !== false,
+          drop_floor: Number(o.drop_floor) || 0, drop_elevator: !!o.drop_elevator,
+          workers: jobWorkers(o), note: o.note || '', speed: o.speed || 'default', provider_type: o.provider_type || 'any', schedule_type: o.schedule_type || 'now',
+          pay_method: o.pay_method || '', coupon_id: o.coupon_id || '',
+          user_offer: Number(o.user_offer) || 0, current_offer: api.currentOffer(o), final_price: moneyOrNull(o.final_price), total: moneyOrNull(o.total),
+          price_breakdown: { base: Number(pb.base) || 0, weight: Number(pb.weight) || 0, floor: Number(pb.floor) || 0, distance: Number(pb.distance) || 0, workers: Number(pb.workers) || 0, discount: Number(pb.discount) || 0 },
+          commission_rate: moneyOrNull(o.commission_rate), commission_amount: moneyOrNull(o.commission_amount), vendor_earning: moneyOrNull(o.vendor_earning),
+          cash_collected: o.cash_collected == null ? null : !!o.cash_collected, accepted_quote_id: o.accepted_quote_id ? String(o.accepted_quote_id) : ''
+        };
+        var customer = u ? { id: String(u.id), name: u.name || '', phone: u.phone || '', email: u.email || '', status: u.status === 'locked' ? 'locked' : 'active' }
+          : (o.user_id ? { id: String(o.user_id), name: '', phone: '', email: '', status: 'active', missing: true } : null);
+        var vrow = o.vendor_id ? vmap[String(o.vendor_id)] : null;
+        var vendor = o.vendor_id ? {
+          id: String(o.vendor_id), name: (vrow && vrow.name) || '', type: (vrow && vrow.type) || 'personal', team_size: Number(vrow && vrow.team_size) || 1,
+          phone: (vrow && vrow.phone) || '', username: (vrow && vrow.username) || '', rating: Number(vrow && vrow.rating) || 0,
+          jobs_done: Number(vrow && vrow.jobs_done) || 0, status: vrow && vrow.status === 'locked' ? 'locked' : 'active', missing: !vrow
+        } : null;
+        var quotes = (r[4] || []).map(function (q) {
+          var v = vmap[String(q.vendor_id)] || {};
+          return {
+            id: String(q.id), vendor_id: String(q.vendor_id || ''), status: q.status || 'pending', price: Number(q.price) || 0, eta_min: Number(q.eta_min) || 0,
+            message: String(q.message || ''), created_at: q.created_at || '', updated_at: q.updated_at || '', withdrawn_at: q.withdrawn_at || '',
+            vendor: { name: v.name || '', type: v.type || 'personal', team_size: Number(v.team_size) || 1, rating: Number(v.rating) || 0, jobs_done: Number(v.jobs_done) || 0, phone: v.phone || '', missing: !vmap[String(q.vendor_id)] }
+          };
+        }).sort(function (a, b) { return (a.price - b.price) || String(a.created_at).localeCompare(String(b.created_at)); });
+        var actorName = function (type, aid) {
+          aid = String(aid == null ? '' : aid);
+          if (type === 'customer') return (u && String(u.id) === aid && u.name) || '';
+          if (type === 'vendor') return (vmap[aid] && vmap[aid].name) || '';
+          if (type === 'staff' || type === 'admin') return smap[aid] || '';
+          return '';
+        };
+        var events = (r[5] || []).map(function (e) {
+          return { id: String(e.id), event: e.event || '', actor_type: e.actor_type || 'system', actor_id: String(e.actor_id == null ? '' : e.actor_id),
+            actor_name: actorName(e.actor_type, e.actor_id), note: String(e.note || ''), created_at: e.created_at || '' };
+        }).sort(function (a, b) { return a.created_at < b.created_at ? -1 : (a.created_at > b.created_at ? 1 : 0); });
+        var timeline = (Array.isArray(o.timeline) ? o.timeline : []).filter(function (x) { return x && x.event; })
+          .map(function (x) { return { event: String(x.event), at: x.at || '' }; });
+        var media = (r[6] || []).map(mapMediaRow).filter(function (m) { return m.path; }).sort(function (a, b) {
+          if (a.role !== b.role) return a.role === 'proof' ? 1 : -1;
+          return a.kind === b.kind ? 0 : (a.kind === 'image' ? -1 : 1);
+        });
+        return { order: order, customer: customer, vendor: vendor, quotes: quotes, events: events, timeline: timeline, media: media };
+      });
     });
   };
 })(window.TTV);

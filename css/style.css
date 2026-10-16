@@ -1328,3 +1328,117 @@ button.vendor-stat:active{background:#f3f8fe}
 .st-theme svg{width:18px;height:18px;flex-shrink:0}
 .st-theme.is-on{background:#2b9bff;color:#fff;box-shadow:0 4px 12px #2b9bff40}
 .st-logout{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;min-height:52px;margin:22px 0 8px;border:0;border-radius:999px;background:#e5484d;color:#fff;font-weight:600;font-size:15px;letter-spacing:-.01em;box-shadow:0 6px 14px #e5484d33}
+
+/* ===== 7.4 Mã giảm giá (#/coupons) — bám docs/reference/10-ma-giam-gia-*.jpg ===== */
+.cp{display:flex;flex-direction:column;flex:1;min-height:0;background:#fbfcfe}
+.cp>header{flex:0 0 auto}
+.cp-page{flex:1;min-height:0;overflow:auto;padding:14px 16px 28px}
+.cp-enter{padding:16px;border-radius:20px;background:#fff;box-shadow:0 4px 18px rgba(20,33,61,.08)}
+.cp-enter label{display:block;margin:0 0 12px;font-size:15px;font-weight:800;color:#14213d}
+.cp-enter__row{display:flex;gap:10px}
+.cp-enter input{flex:1;min-width:0;height:48px;padding:0 14px;border:1px solid #e3e8ef;border-radius:14px;background:#fff;font:inherit;font-size:15px;font-weight:600;letter-spacing:.02em;color:#14213d;outline:0}
+.cp-enter input::placeholder{color:#a3acba;font-weight:400;letter-spacing:0}
+.cp-enter input:focus{border-color:#1b9bf0;box-shadow:0 0 0 3px #1b9bf026}
+.cp-apply{flex-shrink:0;min-width:104px;height:48px;border-radius:14px;font-weight:700}
+.cp-page .notice{margin:14px 0 6px;border-radius:16px;line-height:1.45}
+.cp-tabs{display:flex;border-bottom:1px solid #e9edf3;margin-top:10px}
+.cp-tab{flex:1;min-height:46px;border:0;background:transparent;color:#9aa3b2;font:inherit;font-size:15px;font-weight:700;border-bottom:2px solid transparent;margin-bottom:-1px}
+.cp-tab.is-on{color:#1b9bf0;border-bottom-color:#1b9bf0}
+.cp-list{display:flex;flex-direction:column;gap:12px;padding-top:14px}
+.cp-card{display:flex;align-items:stretch;border-radius:16px;background:#fff;box-shadow:0 3px 14px rgba(20,33,61,.08);overflow:hidden}
+.cp-card__ico{display:grid;place-items:center;flex:0 0 74px;color:#1b9bf0;background:#eef6ff;border-right:2px dashed #cfe0f5}
+.cp-card__body{flex:1;min-width:0;padding:14px 14px 12px}
+.cp-card__body h3{margin:0 0 4px;font-size:16px;font-weight:800;color:#14213d;line-height:1.3}
+.cp-card__body p{margin:0;font-size:13.5px;color:#6b7686;line-height:1.4}
+.cp-card__hint{margin-top:2px!important;color:#a45d00!important;font-size:12.5px!important}
+.cp-card__foot{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:12px}
+.cp-card__date{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;color:#9aa3b2}
+.cp-tag{padding:6px 12px;border-radius:10px;background:#e6f2fd;color:#1b7be4;font-size:12.5px;font-weight:800;letter-spacing:.03em}
+.cp-tag--off{background:#eceef2;color:#aab1bd;letter-spacing:0;font-weight:700}
+.cp-card--used,.cp-card--expired{background:#f6f7f8;box-shadow:none}
+.cp-card--used .cp-card__ico,.cp-card--expired .cp-card__ico{background:#f1f2f4;color:#b4bac4;border-right-color:#dfe2e7}
+.cp-card--used h3,.cp-card--expired h3{color:#8b93a1}
+.cp-card--used .cp-card__body p,.cp-card--expired .cp-card__body p{color:#aab1bd}
+.cp-empty{text-align:center;padding:44px 24px 20px}
+.cp-empty svg{display:block;margin:0 auto 18px}
+.cp-empty h3{margin:0 0 8px;font-size:17px;font-weight:800;color:#14213d}
+.cp-empty p{margin:0;font-size:14px;color:#8b97a8;line-height:1.45}
+.cp-retry{display:flex;margin:6px auto 0}
+
+/* ===== 3.7 Nhật ký hoạt động (#/admin/audit-logs) ===== */
+.admin-modal-sub { margin:14px 0 4px; font-size:var(--fs-sm); font-weight:700; color:var(--c-text); }
+.admin-modal-text.admin-muted { margin-top:14px; }
+.modal__body .admin-kv__row dd { margin:0; text-align:right; word-break:break-word; max-width:62%; }
+.modal__body .admin-kv__row dt { color:var(--c-text-muted); }
+[data-al-open] { cursor:pointer; }
+
+/* ===== 3.8 Dashboard khung (#/admin) ===== */
+.admin-kpi--link { width:100%; text-align:left; font:inherit; cursor:pointer; }
+.admin-kpi--link:active { transform:scale(.98); }
+.admin-kpi--warn .admin-kpi__icon { color:var(--c-warning); background:var(--c-warning-bg); }
+.admin-skel { display:block; border-radius:8px; background:linear-gradient(90deg,#edf1f7 25%,#f7f9fc 50%,#edf1f7 75%); background-size:200% 100%; animation:admin-skel 1.2s ease-in-out infinite; }
+.admin-skel--value { width:64%; height:26px; margin-top:3px; }
+.admin-skel--badge { width:28px; height:20px; }
+@keyframes admin-skel { to { background-position:-200% 0; } }
+.admin-todo { width:100%; }
+.admin-todo__count { min-width:28px; padding:3px 9px; border-radius:999px; background:var(--c-neutral-bg); color:var(--c-text-muted); font-size:12px; font-weight:700; text-align:center; }
+.admin-todo__count.is-hot { background:var(--c-warning-bg); color:var(--c-warning); }
+.admin-chart-card { padding:14px; border:1px solid #e8edf5; border-radius:17px; background:#fff; box-shadow:0 2px 8px #14213d08; }
+.admin-chart-head { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.admin-chart-head strong { font-size:14px; }
+.admin-segment { display:inline-flex; padding:2px; border-radius:10px; background:var(--c-neutral-bg); }
+.admin-segment__btn { min-height:28px; padding:3px 12px; border:0; border-radius:8px; background:transparent; color:var(--c-text-muted); font:inherit; font-size:12px; font-weight:700; }
+.admin-segment__btn.is-on { background:#fff; color:var(--c-primary-600); box-shadow:0 1px 3px #14213d1a; }
+.admin-bars { display:flex; align-items:flex-end; gap:8px; height:120px; margin-top:14px; padding:0 2px; border-bottom:1px solid #e8edf5; }
+.admin-bar { flex:1 1 0; min-width:0; border-radius:6px 6px 0 0; background:var(--c-primary-400); }
+.admin-bar.is-empty { background:#e8eef7; }
+.admin-bars.is-loading .admin-bar { animation:admin-skel 1.2s ease-in-out infinite; background:linear-gradient(90deg,#edf1f7 25%,#f7f9fc 50%,#edf1f7 75%); background-size:200% 100%; }
+.admin-chart__note { margin:10px 0 0; color:var(--c-text-muted); font-size:11px; text-align:center; }
+
+/* ===== 8.1 Quản lý khách (#/admin/customers) ===== */
+.admin-wallet-head { display:flex; flex-direction:column; align-items:center; gap:4px; text-align:center; }
+.admin-wallet-head strong { font-size:28px; line-height:1.2; color:var(--c-primary-600); }
+.admin-wallet-btns { display:flex; gap:8px; width:100%; margin-top:10px; }
+.admin-wallet-btns .btn { flex:1; }
+.admin-tx-amt { align-self:center; font-size:14px; white-space:nowrap; }
+.admin-tx-amt.is-in { color:var(--c-success); }
+.admin-tx-amt.is-out { color:var(--c-danger); }
+.admin-more-btn { margin-top:10px; }
+.admin-detail-gap { height:12px; }
+.modal__body .field { width:100%; }
+
+/* ===== 8.2 Quản lý đơn (#/admin/orders) ===== */
+.admin-list-meta__actions { display:inline-flex; gap:14px; align-items:center; }
+.admin-date-range { display:flex; gap:8px; margin-top:10px; }
+.admin-date-range label { display:flex; flex:1; flex-direction:column; gap:4px; min-width:0; color:var(--c-text-muted); font-size:var(--fs-xs); }
+.admin-date-range input { width:100%; min-height:40px; padding:6px 10px; border:1px solid var(--c-border); border-radius:12px; background:#fff; font:inherit; font-size:var(--fs-sm); }
+.admin-date-error { margin:6px 0 0; color:var(--c-danger); font-size:var(--fs-xs); }
+.admin-code-btn { display:inline-flex; align-items:center; gap:6px; padding:5px 12px; border:1px dashed var(--c-primary-600); border-radius:999px; background:#fff; color:var(--c-primary-600); font:inherit; font-size:var(--fs-sm); font-weight:700; letter-spacing:.03em; cursor:pointer; }
+.admin-code-btn:active { background:var(--c-primary-50); }
+.admin-actions--card { margin-top:10px; }
+.admin-record.is-accepted { border-color:var(--c-success); background:var(--c-success-bg); }
+.admin-quote-price { align-self:center; color:var(--c-primary-600); font-size:15px; white-space:nowrap; }
+.admin-steps { margin:0; padding:0; list-style:none; }
+.admin-step { position:relative; display:flex; gap:12px; padding-bottom:16px; }
+.admin-step:last-child { padding-bottom:0; }
+.admin-step::before { content:''; position:absolute; left:11px; top:24px; bottom:0; width:2px; background:var(--c-border); }
+.admin-step:last-child::before { display:none; }
+.admin-step.is-done::before { background:var(--c-primary-600); }
+.admin-step__dot { z-index:1; display:grid; flex:0 0 24px; place-items:center; width:24px; height:24px; border:2px solid var(--c-border); border-radius:50%; background:#fff; color:var(--c-text-muted); font-size:12px; font-weight:700; }
+.admin-step.is-done .admin-step__dot { border-color:var(--c-primary-600); background:var(--c-primary-600); color:#fff; }
+.admin-step.is-cancel .admin-step__dot { border-color:var(--c-danger); background:var(--c-danger); color:#fff; }
+.admin-step.is-cancel::before { background:var(--c-danger); }
+.admin-step__body { min-width:0; padding-top:2px; }
+.admin-step__body strong { display:block; font-size:var(--fs-sm); }
+.admin-step__body span { display:block; margin-top:2px; color:var(--c-text-muted); font-size:var(--fs-xs); word-break:break-word; }
+.admin-steps--events .admin-step__dot { flex-basis:14px; width:14px; height:14px; margin:5px 5px 0; }
+.admin-steps--events .admin-step::before { left:11px; top:20px; }
+.admin-media-sub { margin:10px 0 6px; color:var(--c-text-muted); font-size:var(--fs-xs); font-weight:700; letter-spacing:.04em; text-transform:uppercase; }
+.admin-media-sub:first-child { margin-top:0; }
+.admin-media-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+.admin-media-img { display:block; aspect-ratio:1; overflow:hidden; border-radius:12px; background:#eef2f8; }
+.admin-media-img img { display:block; width:100%; height:100%; object-fit:cover; }
+.admin-media-video { position:relative; grid-column:1 / -1; overflow:hidden; border-radius:12px; background:#0b1b33; }
+.admin-media-video video { display:block; width:100%; max-height:240px; }
+.admin-media-dur { position:absolute; right:8px; top:8px; padding:2px 8px; border-radius:999px; background:#000a; color:#fff; font-size:11px; }
+.admin-media-err { display:grid; place-items:center; width:100%; height:100%; padding:6px; color:var(--c-text-muted); font-size:11px; text-align:center; }

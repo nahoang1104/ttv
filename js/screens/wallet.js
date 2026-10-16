@@ -59,6 +59,7 @@ TTV.screens = TTV.screens || {};
     return keys.map(function (k) { return { key: k, items: map[k] }; });
   }
   function titleOf(row) {
+    if (row.method === 'admin') return t('wallet.tx.adjust'); // cộng/trừ thủ công từ admin (8.1)
     if (row.type === 'topup' && row.status === 'pending') return t('wallet.tx.topupPending');
     if (row.type === 'topup' && row.status === 'failed') return t('wallet.tx.topupFail');
     if (row.type === 'topup') return t('wallet.tx.topup');

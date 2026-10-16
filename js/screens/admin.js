@@ -5,8 +5,8 @@
   var C = TTV.Components;
   var STAFF = ['SUPER_ADMIN']; // chỉ 1 vai trò admin duy nhất
   var MODULES = [
-    { id:'customers', title:'Khách hàng', desc:'Hồ sơ, định danh và trạng thái tài khoản', icon:'♙', group:'ops', roles:STAFF, route:'/admin/customers' },
-    { id:'orders', title:'Đơn hàng', desc:'Theo dõi và hỗ trợ xử lý đơn', icon:'▣', group:'ops', roles:STAFF, route:'/admin/orders' },
+    { id:'customers', title:'Khách hàng', desc:'Hồ sơ, định danh và trạng thái tài khoản', icon:'♙', group:'ops', roles:STAFF, route:'/admin/customers', own:true },
+    { id:'orders', title:'Đơn hàng', desc:'Theo dõi và hỗ trợ xử lý đơn', icon:'▣', group:'ops', roles:STAFF, route:'/admin/orders', own:true },
     { id:'vendors', title:'Thợ & tổ đội', desc:'Tài khoản, hồ sơ và trạng thái hoạt động', icon:'⚒', group:'ops', roles:STAFF, route:'/admin/vendors', own:true },
     { id:'finance', title:'Tài chính', desc:'Giao dịch, ví và yêu cầu rút tiền', icon:'₫', group:'finance', roles:STAFF, route:'/admin/finance' },
     { id:'promotions', title:'Khuyến mãi', desc:'Mã giảm giá và chương trình ưu đãi', icon:'％', group:'ops', roles:STAFF, route:'/admin/promotions' },
@@ -15,7 +15,7 @@
     { id:'notifications', title:'Thông báo', desc:'Gửi thông báo tới người dùng', icon:'♧', group:'ops', roles:STAFF, route:'/admin/notifications' },
     { id:'pricing', title:'Giá & cấu hình', desc:'Đơn giá, hoa hồng và thiết lập hệ thống', icon:'⚙', group:'more', roles:STAFF, route:'/admin/settings', own:true },
     { id:'content', title:'Nội dung ứng dụng', desc:'Banner, FAQ và chính sách', icon:'▤', group:'more', roles:STAFF, route:'/admin/content' },
-    { id:'audit-logs', title:'Nhật ký hoạt động', desc:'Lịch sử thao tác quản trị', icon:'◷', group:'more', roles:STAFF, route:'/admin/audit-logs' }
+    { id:'audit-logs', title:'Nhật ký hoạt động', desc:'Lịch sử thao tác quản trị', icon:'◷', group:'more', roles:STAFF, route:'/admin/audit-logs', own:true }
   ];
   var MODULE_ROWS = {
     customers: [{name:'Danh sách khách hàng', detail:'Hồ sơ và trạng thái định danh', status:'Sắp triển khai'}],
@@ -60,6 +60,8 @@
     return '<button class="admin-module-card" data-admin-route="'+m.route+'"><span class="admin-module-icon">'+m.icon+'</span><span class="admin-module-copy"><strong>'+esc(m.title)+'</strong><small>'+esc(m.desc)+'</small></span><span class="admin-chevron">›</span></button>';
   }
   function dashboard(path, role) {
+    // Task 3.8: dashboard khung nằm ở admin/dashboard.js; bản dưới đây chỉ là dự phòng nếu file đó chưa nạp.
+    if (TTV.screens.adminDashboard) return TTV.screens.adminDashboard.render({ path: path }, { shell: function (pth, title, body, r) { shell(pth, title, body, r); }, moduleCard: moduleCard });
     var mods = visibleModules(role), shortcuts = mods.filter(function (m) { return ['customers','orders','vendors','reports'].indexOf(m.id) >= 0; }).slice(0,4);
     var body = '<section class="admin-welcome"><div class="admin-welcome__copy"><span class="admin-kicker">KHÔNG GIAN QUẢN TRỊ</span><h2>Xin chào, '+esc((session() || {}).name || 'quản trị viên')+'</h2><p>Theo dõi và điều phối hoạt động TingTingVac.</p></div><span class="admin-welcome__art">⌘</span></section>'+
       '<div class="admin-section-heading"><h2>Tổng quan</h2><span class="admin-muted">Bản khung 3.1</span></div><div class="admin-kpi-grid">'+[
@@ -114,7 +116,8 @@
   }
   TTV.screens.admin = { render: render, modules: MODULES, shell: shell, esc: esc };
   var routeOptions = { roles: STAFF, loginRoute:'/staff-login', deniedRoute:'/admin' };
-  ['/admin','/admin/dashboard','/admin/operations','/admin/more'].forEach(function (path) { TTV.Router.add(path, render, routeOptions); });
+  var leaveDashboard = function () { if (TTV.screens.adminDashboard) TTV.screens.adminDashboard.destroy(); };
+  ['/admin','/admin/dashboard','/admin/operations','/admin/more'].forEach(function (path) { TTV.Router.add(path, render, { roles: STAFF, loginRoute:'/staff-login', deniedRoute:'/admin', destroy: leaveDashboard }); });
   TTV.Router.add('/admin/finance', render, { roles:STAFF, loginRoute:'/staff-login', deniedRoute:'/admin' });
   MODULES.forEach(function (m) { if (m.own) return; /* route do màn riêng đăng ký (vd: vendors.js) */ TTV.Router.add(m.route, render, { roles:m.roles, loginRoute:'/staff-login', deniedRoute:'/admin' }); });
   document.addEventListener('click', function (e) {
