@@ -89,6 +89,8 @@ window.TTV = window.TTV || {};
   var lastUnreadIds = {};
   var cached = [];
   var fetched = false;
+  var heldRead = {};
+  var holdUntil = 0;
   var badgeCbs = [];
   var listCbs = [];
   var busy = false;
@@ -157,11 +159,15 @@ window.TTV = window.TTV || {};
       busy = false;
       rows = rows || [];
       var key = sessionKey();
+      if (Date.now() < holdUntil) {
+        rows.forEach(function (r) { if (heldRead[r.id]) r.is_read = true; });
+      } else heldRead = {};
       var unread = 0;
       var unreadIds = {};
       rows.forEach(function (r) {
         if (!r.is_read) { unread += 1; unreadIds[r.id] = true; }
       });
+      if (unread === 0) { holdUntil = 0; heldRead = {}; }
       var sig = listSig(rows);
       var arrivedRows = fetched && key === lastKey ? rows.filter(function (r) { return r && unreadIds[r.id] && !lastUnreadIds[r.id]; }) : [];
       var arrived = arrivedRows.length > 0;
@@ -215,10 +221,38 @@ window.TTV = window.TTV || {};
       }
     };
   }
+  function publishLocal() {
+    var unread = 0;
+    var unreadIds = {};
+    cached.forEach(function (r) {
+      if (!r.is_read) { unread += 1; unreadIds[r.id] = true; }
+    });
+    lastUnread = unread;
+    lastUnreadIds = unreadIds;
+    lastSig = listSig(cached);
+    badgeCbs.slice().forEach(function (cb) { try { cb(unread); } catch (_) {} });
+    listCbs.slice().forEach(function (cb) { try { cb(cached.slice()); } catch (_) {} });
+  }
 
   TTV.NotiLive = {
     unread: function () { return lastUnread < 0 ? 0 : lastUnread; },
     setSoundEnabled: function (on) { soundEnabled = on !== false; },
+    markReadLocal: function (id) {
+      id = String(id || '');
+      if (!id) return;
+      heldRead[id] = true;
+      holdUntil = Date.now() + 10000;
+      cached.forEach(function (r) { if (String(r.id) === id) r.is_read = true; });
+      publishLocal();
+    },
+    markAllReadLocal: function () {
+      holdUntil = Date.now() + 10000;
+      cached.forEach(function (r) {
+        r.is_read = true;
+        heldRead[r.id] = true;
+      });
+      publishLocal();
+    },
     watchBadge: function (cb) { return addWatch(badgeCbs, cb, 'badge'); },
     watchList: function (cb) { return addWatch(listCbs, cb, 'list'); }
   };

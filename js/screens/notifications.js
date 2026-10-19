@@ -183,6 +183,11 @@ TTV.screens = TTV.screens || {};
     }
     var all = e.target.closest('[data-nt-readall]');
     if (all) {
+      if (all.getAttribute('data-busy')) return;
+      all.setAttribute('data-busy', '1');
+      all.disabled = true;
+      items.forEach(function (r) { r.is_read = true; });
+      paintList();
       TTV.api.markAllNotificationsRead().catch(function (err) {
         TTV.Components.toast((err && err.message) || t('noti.err'), 'danger');
       });

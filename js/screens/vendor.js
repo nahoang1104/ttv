@@ -71,7 +71,7 @@ TTV.screens = TTV.screens || {};
     var tl = typeLabel(v);
     if (tl) chips.push(tl + (Number(v.team_size) > 1 ? ' · ' + t('vendor.team', { n: v.team_size }) : ''));
     chips.push(Number(v.rating) > 0
-      ? '★ ' + Number(v.rating).toFixed(1) + ' · ' + t('vendor.jobsDone', { n: Number(v.jobs_done) || 0 })
+      ? Number(v.rating).toFixed(1) + '/5 · ' + t('vendor.jobsDone', { n: Number(v.jobs_done) || 0 })
       : t('vendor.rating.none'));
     if (opts.phone && v.phone) chips.push(TTV.Utils.maskPhone(v.phone));
     var unread = TTV.NotiLive ? TTV.NotiLive.unread() : 0;

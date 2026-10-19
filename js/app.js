@@ -63,6 +63,12 @@ TTV.ready = TTV.Store.ready().then(function () { return TTV.Seed.run(); }).then(
   TTV.Router.add('/wallet', function () {
     TTV.screens.wallet.render(document.getElementById('app'));
   }, { roles: ['CUSTOMER'], loginRoute: '/login', deniedRoute: '/login', destroy: function () { TTV.screens.wallet.destroy(); } });
+  TTV.Router.add('/reviews', function () {
+    TTV.screens.reviews.render(document.getElementById('app'));
+  }, { roles: ['CUSTOMER'], loginRoute: '/login', deniedRoute: '/login', destroy: function () { TTV.screens.reviews.destroy(); } });
+  TTV.Router.add('/orders/:id/review', function (ctx) {
+    TTV.screens.reviewForm.render(document.getElementById('app'), ctx);
+  }, { roles: ['CUSTOMER'], loginRoute: '/login', deniedRoute: '/login', destroy: function () { TTV.screens.reviewForm.destroy(); } });
   TTV.Router.add('/orders/:id/quotes', function (ctx) {
     TTV.screens.orderQuotes.render(document.getElementById('app'), ctx);
   }, { roles: ['CUSTOMER'], loginRoute: '/login', deniedRoute: '/login', destroy: function () { TTV.screens.orderQuotes.destroy(); } });
