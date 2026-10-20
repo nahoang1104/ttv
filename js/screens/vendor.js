@@ -34,6 +34,7 @@ TTV.screens = TTV.screens || {};
     lock: svg('<rect x="5" y="10.5" width="14" height="9.5" rx="2"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5"/>'),
     logout: svg('<path d="M10 5H6.5A1.5 1.5 0 0 0 5 6.5v11A1.5 1.5 0 0 0 6.5 19H10"/><path d="M14 8l4 4-4 4M18 12H9.5"/>'),
     chevron: svg('<path d="m9.5 6 6 6-6 6"/>'),
+    history: svg('<circle cx="12" cy="12" r="8"/><path d="M12 7.5V12l3 2"/>'),
     bell: svg('<path d="M6.5 16.5v-5a5.5 5.5 0 0 1 11 0v5l1.4 1.5H5.1z"/><path d="M10 20.5a2.2 2.2 0 0 0 4 0"/>')
   };
 
@@ -249,6 +250,7 @@ TTV.screens = TTV.screens || {};
     { title: 'vendor.profile.section.activity', items: [
       { icon: 'bell', label: 'vendor.notifications', route: '/vendor/notifications' },
       { icon: 'quote', label: 'vendor.profile.quotes', route: '/vendor/quotes' },
+      { icon: 'history', label: 'vendor.profile.history', route: '/vendor/history' },
       { icon: 'wallet', label: 'vendor.profile.wallet', route: '/vendor/wallet' },
       { icon: 'withdraw', label: 'vendor.profile.withdraw', route: '/vendor/withdrawals' },
       { icon: 'star', label: 'vendor.profile.reviews', route: '/vendor/reviews' }

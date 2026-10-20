@@ -18,6 +18,7 @@ window.TTV = window.TTV || {};
   var host = null;     // vùng nội dung của khung admin
   var list = null;     // { all, services, q, status, service, range, from, to, page }
   var detail = null;   // { id, data, tab }
+  var FUNNEL = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 5h18l-7 8.5V19l-4 2v-7.5z"/></svg>';
 
   /* ===================== Tiện ích ===================== */
   function fold(v) { // không phân biệt hoa thường và dấu tiếng Việt
@@ -120,9 +121,8 @@ window.TTV = window.TTV || {};
       '<span class="admin-record__chev" aria-hidden="true">›</span></article>';
   }
   function listShell() {
-    return '<div class="admin-list-toolbar"><label class="admin-search"><span>⌕</span><input id="ol-search" type="search" placeholder="' + esc(t('adminOrd.search')) + '" aria-label="' + esc(t('adminOrd.search')) + '" autocomplete="off" value="' + esc(list.q) + '"></label></div>' +
-      '<div class="admin-chip-row" id="ol-status-row" role="group" aria-label="' + esc(t('adminOrd.st.all')) + '"></div>' +
-      '<div class="admin-chip-row" id="ol-service-row" role="group" aria-label="' + esc(t('adminOrd.filter.service')) + '"></div>' +
+    return '<div class="admin-list-toolbar"><label class="admin-search"><span>⌕</span><input id="ol-search" type="search" placeholder="' + esc(t('adminOrd.search')) + '" aria-label="' + esc(t('adminOrd.search')) + '" autocomplete="off" value="' + esc(list.q) + '"></label>' +
+      '<button type="button" class="admin-filter-button" id="ol-filter-btn" data-ol-filter aria-haspopup="dialog" aria-label="' + esc(t('adminOrd.filter.title')) + '">' + FUNNEL + '<b id="ol-filter-n" hidden></b></button></div>' +
       '<div class="admin-chip-row" id="ol-range-row" role="group" aria-label="' + esc(t('adminOrd.filter.date')) + '"></div>' +
       '<div id="ol-custom" hidden><div class="admin-date-range">' +
       '<label><span>' + esc(t('adminOrd.date.from')) + '</span><input type="date" id="ol-from" value="' + esc(list.from) + '"></label>' +
@@ -135,12 +135,37 @@ window.TTV = window.TTV || {};
       '<div class="admin-pagination" id="ol-pager"><button type="button" data-ol-page="-1" id="ol-prev">' + esc(t('adminOrd.prev')) + '</button><span id="ol-page-label"></span><button type="button" data-ol-page="1" id="ol-next">' + esc(t('adminOrd.next')) + '</button></div>';
   }
   function paintChips(base) {
-    host.querySelector('#ol-status-row').innerHTML = statusChips(base);
-    host.querySelector('#ol-service-row').innerHTML = serviceChips();
     host.querySelector('#ol-range-row').innerHTML = rangeChips();
     host.querySelector('#ol-custom').hidden = list.range !== 'custom';
     host.querySelector('#ol-date-error').hidden = !dateInvalid();
     host.querySelector('#ol-clear').hidden = !filtersActive();
+    var n = (list.status !== 'all' ? 1 : 0) + (list.service !== 'all' ? 1 : 0), badge = host.querySelector('#ol-filter-n');
+    badge.hidden = !n; badge.textContent = String(n);
+    host.querySelector('#ol-filter-btn').classList.toggle('is-active', n > 0);
+    paintSheet(base);
+  }
+
+  /* Sheet lọc (trượt từ dưới lên như sheet chọn điểm bốc/trả): trạng thái + dịch vụ. Chọn là áp dụng ngay, danh sách phía sau cập nhật. */
+  function sheetEl() { return document.getElementById('ol-sheet'); }
+  function closeSheet() { var el = sheetEl(); if (el && el.closest('.sheet-backdrop')) el.closest('.sheet-backdrop').remove(); }
+  function sheetBody(base) {
+    return '<h4 class="admin-sheet-sub">' + esc(t('adminOrd.filter.status')) + '</h4><div class="chips" role="group">' + statusChips(base) + '</div>' +
+      '<h4 class="admin-sheet-sub">' + esc(t('adminOrd.filter.service')) + '</h4><div class="chips" role="group">' + serviceChips() + '</div>';
+  }
+  function resultRows(base) { return list.status === 'all' ? base : base.filter(function (r) { return r.status === list.status; }); }
+  function paintSheet(base) {
+    var el = sheetEl(); if (!el) return;
+    el.querySelector('#ol-sheet-body').innerHTML = sheetBody(base);
+    document.getElementById('ol-sheet-apply').textContent = t('adminOrd.filter.apply', { n: resultRows(base).length });
+  }
+  function openSheet() {
+    closeSheet();
+    var base = list.all.filter(function (r) { return matchesBase(r, dateBounds()); });
+    var footer = '<div class="admin-sheet-actions"><button type="button" class="btn btn-secondary" data-of="reset">' + esc(t('adminOrd.filter.reset')) + '</button>' +
+      '<button type="button" class="btn btn-primary" id="ol-sheet-apply" data-sheet-close></button></div>';
+    document.body.insertAdjacentHTML('beforeend', C.sheet(t('adminOrd.filter.title'), '<div id="ol-sheet"><div id="ol-sheet-body"></div></div>', { footer: footer }));
+    document.body.lastElementChild.classList.add('is-admin-filter');
+    paintSheet(base);
   }
   function paintResults() {
     var b = dateBounds(), base = list.all.filter(function (r) { return matchesBase(r, b); });
@@ -175,7 +200,7 @@ window.TTV = window.TTV || {};
   }
   function renderList(ctx) {
     var s = TTV.auth.getSession(), my = ++token;
-    list = null; detail = null;
+    closeSheet(); list = null; detail = null;
     TTV.screens.admin.shell(ctx.path, t('adminOrd.title'), '', s && s.role);
     host = document.querySelector('.admin-content');
     loadList(my);
@@ -401,8 +426,17 @@ window.TTV = window.TTV || {};
   }
 
   /* ===================== Sự kiện ===================== */
+  function onSheetClick(e) { // chip trong sheet lọc nằm ngoài vùng host (gắn vào body)
+    var sh = sheetEl(), target = e.target, el;
+    if (!sh || !list || !target.closest || !sh.contains(target) && !target.closest('[data-of]')) return false;
+    if ((el = target.closest('[data-ol-status]'))) { list.status = el.getAttribute('data-ol-status'); list.page = 0; paintResults(); return true; }
+    if ((el = target.closest('[data-ol-service]'))) { list.service = el.getAttribute('data-ol-service'); list.page = 0; paintResults(); return true; }
+    if (target.closest('[data-of="reset"]')) { list.status = 'all'; list.service = 'all'; list.page = 0; paintResults(); return true; }
+    return false;
+  }
   function onClick(e) {
     var el, target = e.target;
+    if (onSheetClick(e)) return;
     if (!target || !target.closest || !host || !document.body.contains(host)) return;
     if (detail && host.contains(target)) {
       if ((el = target.closest('[data-od-tab]'))) { detail.tab = el.getAttribute('data-od-tab'); paintBody(); return; }
@@ -414,6 +448,7 @@ window.TTV = window.TTV || {};
       }
     }
     if (list && host.contains(target)) {
+      if (target.closest('[data-ol-filter]')) { openSheet(); return; }
       if ((el = target.closest('[data-ol-open]'))) { goTo(LIST + '/' + encodeURIComponent(el.getAttribute('data-ol-open'))); return; }
       if ((el = target.closest('[data-ol-status]'))) { list.status = el.getAttribute('data-ol-status'); list.page = 0; paintResults(); return; }
       if ((el = target.closest('[data-ol-service]'))) { list.service = el.getAttribute('data-ol-service'); list.page = 0; paintResults(); return; }
@@ -463,7 +498,7 @@ window.TTV = window.TTV || {};
   document.addEventListener('keydown', onKeydown);
   document.addEventListener('error', onMediaError, true);
 
-  function destroy() { token++; list = null; detail = null; host = null; }
+  function destroy() { closeSheet(); token++; list = null; detail = null; host = null; }
 
   TTV.screens.adminOrders = { renderList: renderList, renderDetail: renderDetail, destroy: destroy };
   var opts = { roles: ['SUPER_ADMIN'], loginRoute: '/staff-login', deniedRoute: '/admin', destroy: destroy };

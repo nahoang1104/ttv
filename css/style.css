@@ -1442,3 +1442,19 @@ button.vendor-stat:active{background:#f3f8fe}
 .admin-media-video video { display:block; width:100%; max-height:240px; }
 .admin-media-dur { position:absolute; right:8px; top:8px; padding:2px 8px; border-radius:999px; background:#000a; color:#fff; font-size:11px; }
 .admin-media-err { display:grid; place-items:center; width:100%; height:100%; padding:6px; color:var(--c-text-muted); font-size:11px; text-align:center; }
+
+.admin-filter-button { position:relative; width:44px; padding:0; font-size:18px; color:var(--c-text); }
+.admin-filter-button.is-active { border-color:var(--c-primary-600); color:var(--c-primary-600); }
+.admin-filter-button b { position:absolute; top:-6px; right:-6px; min-width:18px; height:18px; padding:0 4px; border-radius:9px; background:var(--c-primary-600); color:#fff; font-size:11px; line-height:18px; text-align:center; }
+.sheet-backdrop.is-admin-filter { align-items:flex-end; padding:0; }
+.sheet-backdrop.is-admin-filter .bottom-sheet { width:100%; }
+.sheet-backdrop.is-admin-filter .bottom-sheet__header h2 { font-size:20px; font-weight:800; }
+.sheet-backdrop.is-admin-filter .bottom-sheet__header .icon-btn { width:36px; height:36px; border-radius:50%; background:#f3f5f8; color:#6b7686; }
+.sheet-backdrop.is-admin-filter .bottom-sheet__body { overflow:auto; padding:6px 18px 12px; }
+.sheet-backdrop.is-admin-filter .bottom-sheet__footer { padding:10px 18px calc(16px + env(safe-area-inset-bottom)); border-top:1px solid #eef2f6; }
+.admin-sheet-sub { margin:14px 0 8px; color:var(--c-text-muted); font-size:var(--fs-xs); font-weight:700; letter-spacing:.04em; text-transform:uppercase; }
+.admin-sheet-sub:first-child { margin-top:4px; }
+.admin-sheet-actions { display:flex; gap:10px; width:100%; }
+.admin-sheet-actions .btn { flex:1 1 0; width:auto; min-width:0; white-space:nowrap; }
+.admin-sheet-actions .btn-primary { flex:1.6 1 0; }
+.vh-more { margin-top:12px; }

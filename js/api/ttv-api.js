@@ -1507,6 +1507,29 @@ window.TTV = window.TTV || {};
     });
   };
 
+  // Lịch sử công việc: đơn đã HOÀN THÀNH của chính thợ (mới nhất trước). Mở chi tiết bằng #/vendor/market/:id như Việc của tôi.
+  api.listVendorHistory = function () {
+    return requireVendorSelf().then(function (id) {
+      return Promise.all([
+        TTV.Store.query('orders', function (o) { return String(o.vendor_id) === id && o.status === 'completed'; }),
+        TTV.Store.query('quotes', function (q) { return String(q.vendor_id) === id; }),
+        api.listServices(),
+        TTV.Store.get('pricing_config', 'default')
+      ]);
+    }).then(function (p) {
+      var env = marketEnv(p[3], p[2], p[1]);
+      var list = (p[0] || []).map(function (o) {
+        var view = marketView(o, env);
+        view.final_price = Number(o.final_price) || (view.my_quote && view.my_quote.price) || 0;
+        view.completed_at = o.completed_at || o.matched_at || o.created_at || '';
+        view.vendor_earning = o.vendor_earning == null || !isFinite(Number(o.vendor_earning)) ? null : Number(o.vendor_earning);
+        return view;
+      });
+      list.sort(function (a, b) { return String(b.completed_at || '').localeCompare(String(a.completed_at || '')); });
+      return { jobs: list };
+    });
+  };
+
   // KIO ghi đơn theo chunk: đọc giữa chừng có thể thiếu bản ghi. Đọc lại vài lần trước khi báo không thấy.
   function waitMs(ms) {
     return new Promise(function (resolve) { setTimeout(resolve, ms); });
