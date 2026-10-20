@@ -135,7 +135,7 @@ TTV.screens = TTV.screens || {};
     var base = t('quotes.type.' + v.type);
     return v.type === 'personal' ? base : base + ' · ' + t('quotes.team', { n: v.team_size });
   }
-  function ratingText(v) { return v.rating > 0 ? '★ ' + v.rating.toFixed(1).replace('.', ',') : t('quotes.noRating'); }
+  function ratingText(v) { return v.rating > 0 ? v.rating.toFixed(1) + '/5' : t('quotes.noRating'); }
   function vendorMeta(q) {
     return esc(ratingText(q.vendor)) + ' · ' + esc(t('quotes.jobs', { n: q.vendor.jobs_done }));
   }
@@ -147,6 +147,7 @@ TTV.screens = TTV.screens || {};
           '<span>' + esc(typeText(q.vendor)) + '</span></div>' +
         '<div class="qc-price"><b>' + money(q.price) + '</b>' + (save > 0 ? '<small>' + esc(t('quotes.save', { n: money(save) })) + '</small>' : '') + '</div></header>' +
       '<p class="qc-meta">' + vendorMeta(q) + '</p>' +
+      '<button type="button" class="qc-rev-link" data-reviews="' + esc(q.vendor.id) + '" data-reviews-name="' + esc(q.vendor.name || t('quotes.vendor.unknown')) + '">' + esc(t('quotes.reviews')) + '</button>' +
       '<p class="qc-meta qc-meta--eta">' + esc(t('quotes.eta', { n: q.eta_min })) + ' · ' + esc(TTV.Utils.relativeTime(q.updated_at || q.created_at)) + '</p>' +
       (q.message ? '<p class="qc-msg">“' + esc(q.message) + '”</p>' : '') +
       '<div class="qc-foot">' + (i === 0 && total > 1 ? '<span class="qc-tag">' + esc(t('quotes.best')) + '</span>' : '<span></span>') +
@@ -329,7 +330,103 @@ TTV.screens = TTV.screens || {};
     });
   }
 
+  var REV_PAGE = 10;
+  function closeReviews() {
+    var d = document.querySelector('[data-qc-rev]');
+    if (d) d.remove();
+  }
+  function starRow(n) {
+    var out = '';
+    for (var i = 1; i <= 5; i++) {
+      var on = i <= n;
+      out += '<svg class="qc-rev__star' + (on ? ' is-on' : '') + '" viewBox="0 0 24 24" aria-hidden="true"><path fill="' + (on ? '#F5B400' : 'none') + '" stroke="' + (on ? '#F5B400' : '#D8DEE8') + '" stroke-width="1.4" stroke-linejoin="round" d="m12 3.4 2.6 5.4 6 .8-4.4 4.2 1.1 5.9L12 16.8 6.7 19.7 7.8 13.8 3.4 9.6l6-.8z"/></svg>';
+    }
+    return '<span class="qc-rev__stars">' + out + '</span>';
+  }
+  function reviewItemsHtml(list) {
+    return (list || []).map(function (it) {
+      var r = it.review || {};
+      return '<article class="qc-rev__item">' +
+        '<header><b>' + esc(it.customer_name || t('quotes.reviews.guest')) + '</b>' +
+          (r.created_at ? '<small>' + esc(TTV.Utils.relativeTime(r.created_at)) + '</small>' : '') + '</header>' +
+        starRow(Number(r.rating) || 0) +
+        (r.comment ? '<p>“' + esc(r.comment) + '”</p>' : '') +
+        (r.vendor_reply ? '<p class="qc-rev__reply">' + esc(t('quotes.reviews.reply', { text: r.vendor_reply })) + '</p>' : '') +
+      '</article>';
+    }).join('');
+  }
+  function fmtRating(n) {
+    return (Math.round(Number(n) * 10) / 10).toFixed(1);
+  }
+  function paintReviewMore(dlg, state) {
+    var more = dlg.querySelector('[data-qc-rev-more]');
+    if (!more) return;
+    var left = state.total - state.shown;
+    more.hidden = left <= 0;
+    more.textContent = t('quotes.reviews.more', { n: left });
+  }
+  function openReviews(vid, name) {
+    closeReviews();
+    document.body.insertAdjacentHTML('beforeend',
+      '<div class="quotes-dlg qc-rev" data-qc-rev>' +
+        '<div class="qc-rev__card" role="dialog" aria-modal="true">' +
+          '<header class="qc-rev__head"><div><h3>' + esc(t('quotes.reviews.title', { name: name })) + '</h3>' +
+            '<p class="qc-rev__sum" data-qc-rev-sum></p></div>' +
+            '<button type="button" class="qc-rev__x" data-qc-rev-x aria-label="' + esc(t('quotes.reviews.close')) + '">×</button></header>' +
+          '<div class="qc-rev__list" data-qc-rev-list>' + TTV.Components.loading(t('common.loading')) + '</div>' +
+          '<div class="qc-rev__morewrap"><button type="button" class="qc-rev__more" data-qc-rev-more hidden></button></div>' +
+        '</div></div>');
+    var dlg = document.querySelector('[data-qc-rev]');
+    var state = { vid: vid, shown: 0, total: 0, loading: false };
+    function close() { closeReviews(); }
+    dlg.querySelector('[data-qc-rev-x]').addEventListener('click', close);
+    dlg.addEventListener('click', function (e) { if (e.target === dlg) close(); });
+    function loadPage() {
+      if (state.loading) return;
+      state.loading = true;
+      var more = dlg.querySelector('[data-qc-rev-more]');
+      if (more && state.shown) { more.disabled = true; }
+      TTV.api.listPublicVendorReviews(vid, { offset: state.shown, limit: REV_PAGE }).then(function (res) {
+        if (!document.body.contains(dlg)) return;
+        state.loading = false;
+        state.total = Number(res.total) || 0;
+        var page = res.reviews || [];
+        var box = dlg.querySelector('[data-qc-rev-list]');
+        var sum = dlg.querySelector('[data-qc-rev-sum]');
+        if (sum) {
+          sum.textContent = state.total
+            ? t('quotes.reviews.summary', { rating: fmtRating(res.rating), n: state.total })
+            : t('quotes.reviews.empty');
+        }
+        if (!box) return;
+        if (!state.shown && !page.length) {
+          box.innerHTML = '<div class="qc-rev__empty"><h4>' + esc(t('quotes.reviews.empty')) + '</h4><p>' + esc(t('quotes.reviews.empty.desc')) + '</p></div>';
+        } else if (!state.shown) {
+          box.innerHTML = reviewItemsHtml(page);
+        } else {
+          box.insertAdjacentHTML('beforeend', reviewItemsHtml(page));
+        }
+        state.shown += page.length;
+        paintReviewMore(dlg, state);
+        if (more) more.disabled = false;
+      }).catch(function (err) {
+        state.loading = false;
+        if (!document.body.contains(dlg)) return;
+        var box = dlg.querySelector('[data-qc-rev-list]');
+        if (box && !state.shown) box.innerHTML = '<p class="qc-rev__err">' + esc((err && err.message) || t('quotes.err.title')) + '</p>';
+        if (more) more.disabled = false;
+      });
+    }
+    dlg.querySelector('[data-qc-rev-more]').addEventListener('click', loadPage);
+    loadPage();
+  }
   function onPickClick(e) {
+    var rev = e.target.closest('[data-reviews]');
+    if (rev) {
+      e.preventDefault();
+      openReviews(rev.getAttribute('data-reviews'), rev.getAttribute('data-reviews-name') || t('quotes.vendor.unknown'));
+      return;
+    }
     var b = e.target.closest('[data-pick]'); if (!b || !order || order.status !== 'finding') return;
     var q = findQuote(b.getAttribute('data-pick'));
     if (q) openPickDlg(q);
@@ -363,7 +460,7 @@ TTV.screens = TTV.screens || {};
     },
     destroy: function () {
       stopTick(); stopPoll();
-      closeCancelDlg(); closePickDlg();
+      closeCancelDlg(); closePickDlg(); closeReviews();
       if (rootEl) { rootEl.classList.remove('is-order'); rootEl.removeEventListener('click', onPickClick); }
       rootEl = null;
       order = null;

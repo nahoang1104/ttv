@@ -78,7 +78,7 @@ TTV.screens = TTV.screens || {};
   }
   function mountMap() {
     unmountMap();
-    if (!rootEl || !order || order.status === 'cancelled' || !window.L) return;
+    if (!rootEl || !order || order.status === 'cancelled' || order.status === 'completed' || !window.L) return;
     var el = rootEl.querySelector('[data-od-map]');
     var pick = order.pickup || {}, drop = order.dropoff || {};
     if (!el || pick.lat == null || drop.lat == null) return;
@@ -132,7 +132,7 @@ TTV.screens = TTV.screens || {};
   }
 
   function mapHtml() {
-    if (!order || order.status === 'cancelled') return '';
+    if (!order || order.status === 'cancelled' || order.status === 'completed') return '';
     if (order.pickup && order.pickup.lat != null && order.dropoff && order.dropoff.lat != null) {
       return '<div class="od-map-wrap">' +
         '<div class="od-map" data-od-map></div>' +
@@ -224,6 +224,23 @@ TTV.screens = TTV.screens || {};
         (tel ? '<a class="btn btn-secondary btn-block qc-call" href="tel:' + esc(tel) + '">' + esc(t('quotes.call', { phone: v.phone })) + '</a>' : '') +
       '</section>';
   }
+
+  function starSvg(on) {
+    return '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="' + (on ? '#F5B400' : 'none') + '" stroke="' + (on ? '#F5B400' : '#D8DEE8') + '" stroke-width="1.4" stroke-linejoin="round" d="m12 3.4 2.6 5.4 6 .8-4.4 4.2 1.1 5.9L12 16.8 6.7 19.7 7.8 13.8 3.4 9.6l6-.8z"/></svg>';
+  }
+  function reviewHtml() {
+    var r = order && order.my_review;
+    if (!r || order.status !== 'completed') return '';
+    var n = Math.max(1, Math.min(5, Number(r.rating) || 0));
+    var stars = '';
+    for (var i = 1; i <= 5; i++) stars += '<span class="od-review__star' + (i <= n ? ' is-on' : '') + '">' + starSvg(i <= n) + '</span>';
+    return '<h2 class="od-h">' + esc(t('od.review.yours')) + '</h2>' +
+      '<section class="od-card od-review">' +
+        '<div class="od-review__stars" role="img" aria-label="' + n + ' sao">' + stars + '</div>' +
+        (r.comment ? '<p class="od-review__cmt">“' + esc(r.comment) + '”</p>' : '<p class="od-review__none">' + esc(t('od.review.noComment')) + '</p>') +
+        (r.vendor_reply ? '<p class="od-review__reply">' + esc(t('od.review.reply', { text: r.vendor_reply })) + '</p>' : '') +
+      '</section>';
+  }
   function payHtml() {
     var pb = order.price_breakdown || {};
     var w = weightName(order.weight_tier);
@@ -260,7 +277,11 @@ TTV.screens = TTV.screens || {};
         '</div>';
     }
     if (st === 'cancelled' || st === 'completed') {
-      return '<div class="od-bar od-bar--one">' +
+      var reviewBtn = canReview(order)
+        ? '<button type="button" class="btn btn-secondary od-bar__go" data-od-review>' + esc(t('od.review')) + '</button>'
+        : '';
+      return '<div class="od-bar' + (reviewBtn ? '' : ' od-bar--one') + '">' +
+        reviewBtn +
         '<button type="button" class="btn btn-primary od-bar__go" data-od-reorder>' + esc(t('od.reorder')) + '</button>' +
         '</div>';
     }
@@ -359,16 +380,24 @@ TTV.screens = TTV.screens || {};
         vendorHtml() +
         photosHtml() +
         payHtml() +
+        reviewHtml() +
       '</main>' +
       actionsHtml();
     bind();
     mountMap();
   }
 
+  function vendorIdOf(o) {
+    return (o && (o.vendor_id || (o.vendor && o.vendor.id))) || '';
+  }
+  function canReview(o) {
+    return !!(o && o.status === 'completed' && !o.my_review);
+  }
   function liveSig(o) {
     if (!o) return '';
     var tl = Array.isArray(o.timeline) ? o.timeline.map(function (x) { return x && x.event; }).join(',') : '';
-    return [o.status, o.vendor_id || '', o.final_price || '', o.completed_at || '', tl].join('|');
+    var rev = o.my_review && o.my_review.id ? o.my_review.id : '';
+    return [o.status, vendorIdOf(o), o.final_price || '', o.completed_at || '', tl, rev].join('|');
   }
   function hasProofMedia() {
     return (media || []).some(function (m) { return m.role === 'proof'; });
@@ -402,10 +431,22 @@ TTV.screens = TTV.screens || {};
           pendingSilent = true;
           return;
         }
-        if (!silent || sig !== orderSig) {
+        var barMiss = canReview(row) && !rootEl.querySelector('[data-od-review]');
+        if (!silent || sig !== orderSig || barMiss) {
           orderSig = sig;
           paint();
-          if (silent && prev && prev !== row.status) statusToast(row.status);
+          if (silent && prev && prev !== row.status) {
+            statusToast(row.status);
+            if (canReview(row)) {
+              var key = 'ttv_review_prompt_' + row.id;
+              try {
+                if (!sessionStorage.getItem(key)) {
+                  sessionStorage.setItem(key, '1');
+                  TTV.Router.navigate('/orders/' + row.id + '/review');
+                }
+              } catch (_) {}
+            }
+          }
         }
         if (pendingSilent) { pendingSilent = false; refresh(true); }
       });
@@ -428,6 +469,10 @@ TTV.screens = TTV.screens || {};
     var reorder = rootEl.querySelector('[data-od-reorder]');
     if (reorder) reorder.addEventListener('click', function () {
       TTV.Router.navigate('/create/order?reorder=' + encodeURIComponent(order.id));
+    });
+    var review = rootEl.querySelector('[data-od-review]');
+    if (review) review.addEventListener('click', function () {
+      TTV.Router.navigate('/orders/' + order.id + '/review');
     });
     rootEl.querySelectorAll('[data-od-zoom]').forEach(function (btn) {
       btn.addEventListener('click', function () { openZoom(btn.getAttribute('data-od-zoom')); });
