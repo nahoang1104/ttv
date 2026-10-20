@@ -114,7 +114,24 @@
     if (mod && allowed(role, mod)) return listPage(path, role, mod);
     TTV.Router.navigate('/admin', {replace:true});
   }
-  TTV.screens.admin = { render: render, modules: MODULES, shell: shell, esc: esc };
+  // Avatar cho danh sách/chi tiết khách và thợ: có ảnh (avatar_path) thì hiện ảnh, không có hoặc ảnh lỗi thì hiện chữ cái đầu tên.
+  //  cls: 'admin-record__avatar' (thẻ danh sách) | 'admin-detail-avatar' (đầu trang chi tiết)
+  function initialOf(name) { return String(name || '?').trim().charAt(0).toUpperCase() || '?'; }
+  function avatarHtml(name, src, cls) {
+    var ini = initialOf(name), path = String(src || '').trim();
+    return '<span class="' + esc(cls) + '">' + (path
+      ? '<img src="' + esc(path) + '" alt="" loading="lazy" data-av-initial="' + esc(ini) + '">'
+      : esc(ini)) + '</span>';
+  }
+  // Ảnh lỗi (file không còn, đường dẫn sai…) → quay về chữ cái đầu (sự kiện error không nổi bọt nên bắt ở pha capture)
+  document.addEventListener('error', function (e) {
+    var img = e.target;
+    if (!img || img.tagName !== 'IMG' || !img.hasAttribute('data-av-initial')) return;
+    var holder = img.parentNode; if (!holder) return;
+    holder.textContent = img.getAttribute('data-av-initial') || '?';
+  }, true);
+
+  TTV.screens.admin = { render: render, modules: MODULES, shell: shell, esc: esc, avatarHtml: avatarHtml };
   var routeOptions = { roles: STAFF, loginRoute:'/staff-login', deniedRoute:'/admin' };
   var leaveDashboard = function () { if (TTV.screens.adminDashboard) TTV.screens.adminDashboard.destroy(); };
   ['/admin','/admin/dashboard','/admin/operations','/admin/more'].forEach(function (path) { TTV.Router.add(path, render, { roles: STAFF, loginRoute:'/staff-login', deniedRoute:'/admin', destroy: leaveDashboard }); });

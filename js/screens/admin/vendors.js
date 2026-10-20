@@ -50,7 +50,7 @@ window.TTV = window.TTV || {};
     var badges = C.badge(typeLabel(v.type) + (v.type === 'personal' ? '' : ' · ' + t('adminVendors.teamSize', { n: v.team_size || 1 })), 'info') + statusBadge(v) +
       (v.must_change_pw ? C.badge(t('adminVendors.mustChange'), 'warning') : '');
     return '<article class="admin-record admin-record--link" role="link" tabindex="0" data-vl-open="' + esc(v.id) + '">' +
-      '<span class="admin-record__avatar">' + esc(String(v.name || '?').trim().charAt(0).toUpperCase() || '?') + '</span>' +
+      TTV.screens.admin.avatarHtml(v.name, v.avatar_path, 'admin-record__avatar') +
       '<div class="admin-record__main"><strong>' + esc(v.name) + '</strong><p>' + esc(sub || t('adminVendors.none')) + '</p><div class="admin-record__badges">' + badges + '</div></div>' +
       '<span class="admin-record__chev" aria-hidden="true">›</span></article>';
   }
@@ -111,7 +111,7 @@ window.TTV = window.TTV || {};
   function detailHtml() {
     var v = detail.vendor, locked = isLocked(v), U = TTV.Utils;
     var badges = '<div class="admin-detail-badges">' + C.badge(typeLabel(v.type), 'info') + statusBadge(v) + (v.must_change_pw ? C.badge(t('adminVendors.mustChange'), 'warning') : '') + '</div>';
-    var head = '<section class="admin-detail-head">' + C.avatar(v.name, v.avatar_path || '', { size: 'lg' }) + '<h2>' + esc(v.name) + '</h2>' +
+    var head = '<section class="admin-detail-head">' + TTV.screens.admin.avatarHtml(v.name, v.avatar_path, 'admin-detail-avatar') + '<h2>' + esc(v.name) + '</h2>' +
       (v.username ? '<span class="admin-muted">@' + esc(v.username) + '</span>' : '') + badges + '</section>';
     var lockedNote = '';
     if (locked) {

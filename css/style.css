@@ -709,7 +709,9 @@ a { color: var(--c-primary-600); }
 .admin-list-meta { display:flex; justify-content:space-between; gap:8px; margin:13px 2px 9px; font-size:11px; }
 .admin-record-list { display:flex; flex-direction:column; gap:9px; }
 .admin-record { display:flex; align-items:flex-start; gap:10px; padding:13px 11px; border:1px solid #e8edf5; border-radius:15px; background:#fff; }
-.admin-record__avatar { display:grid; place-items:center; width:38px; height:38px; flex:0 0 38px; border-radius:13px; color:var(--c-primary-600); background:var(--c-primary-100); font-weight:700; }
+.admin-record__avatar { display:grid; place-items:center; width:38px; height:38px; flex:0 0 38px; overflow:hidden; border-radius:13px; color:var(--c-primary-600); background:var(--c-primary-100); font-weight:700; }
+.admin-record__avatar img, .admin-detail-avatar img { display:block; width:100%; height:100%; object-fit:cover; }
+.admin-detail-avatar { display:grid; place-items:center; width:88px; height:88px; overflow:hidden; border:4px solid #fff; border-radius:50%; color:var(--c-primary-600); background:var(--c-primary-100); font-size:36px; font-weight:700; line-height:1; box-shadow:0 4px 14px rgba(5,63,156,.18); }
 .admin-record__main { flex:1; min-width:0; }
 .admin-record__main>strong { display:block; font-size:12px; }
 .admin-record__main p { margin:3px 0 7px; color:var(--c-text-muted); font-size:11px; }
@@ -1516,3 +1518,31 @@ button.vendor-stat:active{background:#f3f8fe}
 .vr-body{margin:0;font-size:14px}
 .vr-box{margin-top:10px}
 .vr-box textarea{width:100%;margin-bottom:8px;border:1px solid var(--c-border);border-radius:12px;padding:10px 12px;font:inherit}
+
+/* 5.7 Báo giá của tôi (thợ) */
+.mq-tabs{display:flex;flex-wrap:nowrap;gap:8px;margin:0 calc(-1 * var(--sp-4)) 4px;padding:2px var(--sp-4) 6px;overflow-x:auto;scrollbar-width:none;touch-action:pan-x;-webkit-overflow-scrolling:touch}
+.mq-tabs::-webkit-scrollbar{display:none}
+.mq-hint{margin:-4px 2px 10px;font-size:var(--fs-xs);color:var(--c-text-muted)}
+.mq-msg{margin:8px 0 0;padding:8px 10px;border-radius:var(--r-md);background:#f3f7fd;font-size:var(--fs-sm);color:#4a5568;overflow-wrap:anywhere}
+.mq-cap{margin-top:2px}
+.mq-note{flex:none;max-width:48%;text-align:right;font-size:12px;font-weight:600;color:var(--c-text-muted)}
+.mq-note--pending{color:#a45d00}
+.mq-note--accepted{color:#14733b}
+.mq-static:active{background:#fff}
+/* 9.6 Hồ sơ thợ */
+.vi-main{padding-bottom:96px}
+.vi-card{margin:0 0 12px}
+.vi-row{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:8px 0;border-bottom:1px dashed var(--c-border);font-size:var(--fs-sm)}
+.vi-row:last-of-type{border-bottom:0}
+.vi-row span{flex:none;color:var(--c-text-muted)}
+.vi-row b{min-width:0;text-align:right;font-weight:600;overflow-wrap:anywhere}
+.vi-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.vi-hint{margin:6px 0 0;text-align:center;font-size:var(--fs-xs);color:var(--c-text-muted)}
+.vi-hint--left{text-align:left;margin:2px 0 10px}
+.vi-chips{margin-top:2px}
+.vi-err{margin:8px 0 0}
+.vi-remove{margin-top:-2px}
+.vi-action{position:sticky;bottom:0;margin:0;padding:12px var(--sp-4);background:#fff;border-top:1px solid var(--c-border)}
+/* 9.6: ô sửa họ tên / SĐT / phương tiện */
+.vi-field,.vi .field{margin-bottom:var(--sp-3)}
+.vi .vi-card .vi-err{margin:-6px 0 10px}

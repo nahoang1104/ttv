@@ -50,7 +50,7 @@ window.TTV = window.TTV || {};
     var sub = [c.phone, c.email].filter(Boolean).join(' · ');
     var badges = statusBadge(c) + C.badge(t('adminCust.orderCount', { n: c.orders_count }), 'info') + C.badge(money(c.wallet_balance), 'neutral');
     return '<article class="admin-record admin-record--link" role="link" tabindex="0" data-cl-open="' + esc(c.id) + '">' +
-      '<span class="admin-record__avatar">' + esc(String(c.name || '?').trim().charAt(0).toUpperCase() || '?') + '</span>' +
+      TTV.screens.admin.avatarHtml(c.name, c.avatar_path, 'admin-record__avatar') +
       '<div class="admin-record__main"><strong>' + esc(displayName(c)) + '</strong><p>' + esc(sub || t('adminCust.none')) + '</p><div class="admin-record__badges">' + badges + '</div></div>' +
       '<span class="admin-record__chev" aria-hidden="true">›</span></article>';
   }
@@ -175,7 +175,7 @@ window.TTV = window.TTV || {};
   }
   function detailHtml() {
     var d = detail.data, c = d.customer;
-    var head = '<section class="admin-detail-head">' + C.avatar(displayName(c), c.avatar_path || '', { size: 'lg' }) + '<h2>' + esc(displayName(c)) + '</h2>' +
+    var head = '<section class="admin-detail-head">' + TTV.screens.admin.avatarHtml(displayName(c), c.avatar_path, 'admin-detail-avatar') + '<h2>' + esc(displayName(c)) + '</h2>' +
       (c.phone ? '<span class="admin-muted">' + esc(c.phone) + '</span>' : '') + '<div class="admin-detail-badges">' + statusBadge(c) + '</div></section>';
     var note = '';
     if (isLocked(c)) {
