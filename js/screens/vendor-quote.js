@@ -12,6 +12,29 @@ window.TTV = window.TTV || {};
   function vnd(n) { return new Intl.NumberFormat('vi-VN').format(Number(n) || 0) + 'đ'; }
   function digits(s) { return String(s == null ? '' : s).replace(/\D/g, ''); }
   function fmtNum(n) { return n ? new Intl.NumberFormat('vi-VN').format(n) : ''; }
+  // Ô chỉ nhập số, tự định dạng khi gõ. Bộ gõ tiếng Việt trên Windows (Unikey, Telex/VNI của Windows) đưa từng phím vào vùng "đang soạn" (composition):
+  // nếu ghi đè `value` giữa chừng thì ký tự đang soạn bị chèn lại (gõ 45000 ra 445000). Vì vậy: không đụng `value` khi đang soạn,
+  // chỉ định dạng khi composition kết thúc, và chỉ ghi khi giá trị thực sự đổi + giữ vị trí con trỏ.
+  function bindDigits(el, format, after) {
+    var composing = false;
+    function apply() {
+      var pos = el.selectionStart == null ? el.value.length : el.selectionStart;
+      var before = digits(el.value.slice(0, pos)).length, next = format(digits(el.value));
+      if (next !== el.value) {
+        el.value = next;
+        var p = 0, seen = 0;
+        while (p < next.length && seen < before) { if (/\d/.test(next.charAt(p))) seen += 1; p += 1; }
+        try { el.setSelectionRange(p, p); } catch (_) {}
+      }
+      if (after) after();
+    }
+    el.addEventListener('compositionstart', function () { composing = true; });
+    el.addEventListener('compositionend', function () { composing = false; apply(); });
+    el.addEventListener('input', function (e) {
+      if (composing || e.isComposing) { if (after) after(); return; }
+      apply();
+    });
+  }
   function pendingQuote(v) { return v.my_quote && v.my_quote.status === 'pending' ? v.my_quote : null; }
   function closeSheets() { document.querySelectorAll('.sheet-backdrop[data-vq-sheet]').forEach(function (el) { el.remove(); }); }
   function openSheet(html) {
@@ -88,8 +111,8 @@ window.TTV = window.TTV || {};
     var sheet = openSheet(C.sheet(t(q ? 'vendorQuote.titleEdit' : 'vendorQuote.title'), formBody(v, q), { footer: footer }));
     var priceEl = sheet.querySelector('[data-vq-price]'), etaEl = sheet.querySelector('[data-vq-eta]'), msgEl = sheet.querySelector('[data-vq-msg]');
     var sendBtn = sheet.querySelector('[data-vq-submit]');
-    priceEl.addEventListener('input', function () { priceEl.value = fmtNum(Number(digits(priceEl.value)) || 0); setErr(sheet, 'price', ''); setErr(sheet, '_', ''); });
-    etaEl.addEventListener('input', function () { etaEl.value = digits(etaEl.value).slice(0, 3); setErr(sheet, 'eta_min', ''); });
+    bindDigits(priceEl, function (d) { return fmtNum(Number(d) || 0); }, function () { setErr(sheet, 'price', ''); setErr(sheet, '_', ''); });
+    bindDigits(etaEl, function (d) { return d.slice(0, 3); }, function () { setErr(sheet, 'eta_min', ''); });
     msgEl.addEventListener('input', function () { sheet.querySelector('[data-vq-count]').textContent = msgEl.value.length + '/' + MSG_MAX; setErr(sheet, 'message', ''); });
     sheet.addEventListener('click', function (e) {
       if (e.target.closest('[data-vq-max]')) { priceEl.value = fmtNum(v.offer); setErr(sheet, 'price', ''); return; }

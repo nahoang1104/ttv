@@ -470,6 +470,38 @@ window.TTV = window.TTV || {};
     var v = row && row.is_read;
     return v === true || v === 1 || v === '1' || v === 'true';
   }
+  /* ----- Mốc thông báo ("có gì mới không") + giới hạn hộp thư -----
+     Mỗi người có 1 bản ghi nhỏ ở bảng noti_marks: { id: 'vendor:<id>', t: mã ngẫu nhiên }. Mọi thay đổi hộp thư (thêm, đọc, xóa, dọn)
+     đổi `t`. Poll chỉ đọc bảng nhỏ này; `t` không đổi thì KHÔNG tải lại bảng notifications (rất nặng trên KIO). */
+  var NOTI_KEEP_DAYS = 30, NOTI_KEEP_MAX = 100;
+  function notiMarkId(box) { return box.type + ':' + box.id; }
+  function bumpNotiStamp(type, id) {
+    var stamp = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+    return store().put('noti_marks', { id: notiMarkId({ type: type, id: String(id) }), t: stamp }).catch(function () {});
+  }
+  api.getNotiStamp = function () {
+    var box = notiInbox();
+    if (!box) return Promise.resolve('');
+    return store().get('noti_marks', notiMarkId(box), { force: true }).then(function (row) { return row ? String(row.t || '') : ''; });
+  };
+  // Chia hộp thư: giữ thông báo ≤ 30 ngày và tối đa 100 cái mới nhất; phần còn lại là `drop` (sẽ bị xóa).
+  function notiSplit(rows) {
+    var cutoff = Date.now() - NOTI_KEEP_DAYS * 86400000, keep = [], drop = [];
+    rows.slice().sort(function (a, b) { return String(b.created_at || '').localeCompare(String(a.created_at || '')); }).forEach(function (r) {
+      var ts = Date.parse(r.created_at);
+      if ((isFinite(ts) && ts < cutoff) || keep.length >= NOTI_KEEP_MAX) drop.push(r); else keep.push(r);
+    });
+    return { keep: keep, drop: drop };
+  }
+  var pruneBusy = false;
+  function pruneInboxLater(box, drop) {
+    if (pruneBusy || !drop.length) return;
+    pruneBusy = true;
+    store().removeAll('notifications', drop.map(function (r) { return r.id; }))
+      .then(function () { return bumpNotiStamp(box.type, box.id); })
+      .catch(function () {})
+      .then(function () { pruneBusy = false; });
+  }
   function pingLive(topic) {
     if (TTV.Live && typeof TTV.Live.ping === 'function') TTV.Live.ping(topic);
   }
@@ -509,12 +541,15 @@ window.TTV = window.TTV || {};
     };
     var now = new Date().toISOString();
     var key = input.event ? [input.event, input.order_id || '', t.type, t.id].join(':') : '';
-    var findPrev = key
+    // Lấy cả hộp thư của người nhận (1 lần đọc bảng): vừa tìm dòng trùng (dedupe), vừa để dọn bớt thông báo cũ.
+    var findMine = key
       ? store().query('notifications', function (r) {
-        return r.dedupe_key === key && !r.is_read && String(r.recipient_id) === t.id && (r.recipient_type || 'customer') === t.type;
-      }).then(function (rows) { return (rows && rows[0]) || null; })
-      : Promise.resolve(null);
-    return findPrev.then(function (prev) {
+        return String(r.recipient_id) === t.id && (r.recipient_type || 'customer') === t.type;
+      }).then(function (rows) { return rows || []; })
+      : Promise.resolve([]);
+    return findMine.then(function (mine) {
+      var prev = null;
+      mine.some(function (r) { if (r.dedupe_key === key && !notiIsRead(r)) { prev = r; return true; } return false; });
       var row = prev ? Object.assign({}, prev) : {
         id: TTV.Utils.id(),
         is_read: false,
@@ -530,7 +565,15 @@ window.TTV = window.TTV || {};
       row.dedupe_key = key;
       row.created_at = now;
       row.updated_at = now;
-      return store().put('notifications', row);
+      return store().put('notifications', row).then(function (saved) {
+        var rest = mine.filter(function (r) { return String(r.id) !== String(saved.id); });
+        var drop = notiSplit([saved].concat(rest).map(function (r) { return Object.assign({}, r); })).drop;
+        var cleanup = drop.length
+          ? store().removeAll('notifications', drop.map(function (r) { return r.id; })).catch(function () {})
+          : Promise.resolve();
+        // Mốc chỉ đổi SAU khi dữ liệu đã ghi xong: máy khác thấy mốc mới thì chắc chắn đọc được thông báo mới.
+        return cleanup.then(function () { return bumpNotiStamp(t.type, t.id); }).then(function () { return saved; });
+      });
     }).then(function (saved) {
       if (!input.silent) pingLive('noti');
       return saved;
@@ -568,11 +611,11 @@ window.TTV = window.TTV || {};
     var box = notiInbox();
     if (!box) return Promise.resolve([]);
     return store().query('notifications', function (r) { return isMyNotification(r, box); }, opts || {}).then(function (rows) {
-      return (rows || []).map(function (r) {
+      var split = notiSplit((rows || []).map(function (r) {
         return Object.assign({}, r, { is_read: notiIsRead(r) });
-      }).sort(function (a, b) {
-        return String(b.created_at || '').localeCompare(String(a.created_at || ''));
-      });
+      }));
+      pruneInboxLater(box, split.drop); // quá 30 ngày / quá 100 cái: ẩn ngay, xóa thật ở nền
+      return split.keep;
     });
   };
   api.markNotificationRead = function (id) {
@@ -582,7 +625,9 @@ window.TTV = window.TTV || {};
     return store().get('notifications', id).then(function (row) {
       if (!row || !isMyNotification(row, box)) throw fail('NOT_FOUND', 'Không tìm thấy thông báo.');
       if (notiIsRead(row)) return Object.assign({}, row, { is_read: true });
-      return store().put('notifications', Object.assign({}, row, { is_read: true }));
+      return store().put('notifications', Object.assign({}, row, { is_read: true })).then(function (saved) {
+        return bumpNotiStamp(box.type, box.id).then(function () { return saved; });
+      });
     });
   };
   api.markAllNotificationsRead = function () {
@@ -596,7 +641,7 @@ window.TTV = window.TTV || {};
       if (!unread.length) return 0;
       return store().putAll('notifications', unread).then(function () {
         if (store().invalidate) store().invalidate(['notifications']);
-        return unread.length;
+        return bumpNotiStamp(box.type, box.id).then(function () { return unread.length; });
       });
     });
   };
@@ -605,7 +650,7 @@ window.TTV = window.TTV || {};
     if (!box) return Promise.reject(fail('UNAUTH', 'Hãy đăng nhập.'));
     return store().get('notifications', id).then(function (row) {
       if (!row || !isMyNotification(row, box)) throw fail('NOT_FOUND', 'Không tìm thấy thông báo.');
-      return store().remove('notifications', id).then(function () { pingLive('noti'); });
+      return store().remove('notifications', id).then(function () { return bumpNotiStamp(box.type, box.id); }).then(function () { pingLive('noti'); });
     });
   };
 

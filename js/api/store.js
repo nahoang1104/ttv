@@ -3,13 +3,13 @@ window.TTV = window.TTV || {};
 (function (TTV) {
   'use strict';
   var DB_NAME = 'tingtingvac_db';
-  var DB_VERSION = 1;
+  var DB_VERSION = 2; // 2: thêm bảng noti_marks (store mới được tạo trong onupgradeneeded, dữ liệu cũ giữ nguyên)
   var TABLES = [
     'users','addresses','services','pricing_config','orders','order_media','quotes',
     'wallet_transactions','payment_methods','coupons','user_coupons','notification_settings',
     'reviews','faqs','policies','banners','vendors','staff','sessions','order_events',
     'vendor_documents','vendor_transactions','withdrawals','reports','broadcasts','audit_logs',
-    'notifications','app_settings','__meta'
+    'notifications','noti_marks','app_settings','__meta'
   ];
   var APPEND_TABLES = { audit_logs: true, order_events: true };
 
@@ -119,6 +119,12 @@ window.TTV = window.TTV || {};
       }, Promise.resolve()).then(function () { return records.length; });
     },
     remove: function (table, id) { validTable(table); return run(table, 'readwrite', function (s) { return s.delete(String(id)); }).then(function () { return true; }); },
+    removeAll: function (table, ids) {
+      validTable(table);
+      ids = (Array.isArray(ids) ? ids : []).map(String);
+      if (!ids.length) return Promise.resolve(0);
+      return run(table, 'readwrite', function (s) { ids.forEach(function (id) { s.delete(id); }); }).then(function () { return ids.length; });
+    },
     query: function (table, criteria) {
       validTable(table);
       return localStore.list(table).then(function (rows) { return applyQuery(rows || [], criteria); });
@@ -200,6 +206,13 @@ window.TTV = window.TTV || {};
     remove: function (table, id) {
       validTable(table);
       return kioApi().deleteKeys(remoteName(table), [String(id)]).then(function () { return true; });
+    },
+    // Xóa nhiều bản ghi trong MỘT lần đọc bảng (remove từng cái sẽ đọc lại cả bảng mỗi lần).
+    removeAll: function (table, ids) {
+      validTable(table);
+      ids = (Array.isArray(ids) ? ids : []).map(String);
+      if (!ids.length) return Promise.resolve(0);
+      return kioApi().deleteKeys(remoteName(table), ids).then(function () { return ids.length; });
     },
     query: function (table, criteria, opts) {
       validTable(table);
