@@ -9,8 +9,8 @@ window.TTV = window.TTV || {};
   function t(key, params) { return TTV.I18n.t(key, params); }
 
   var BACK = '/admin/more', PAGE_SIZE = 10, DAY = 86400000;
-  var GROUP_ICON = { auth: '♙', vendor: '⚒', customer: '☺', settings: '⚙', other: '◷' };
-  var GROUP_BADGE = { auth: 'info', vendor: 'success', customer: 'info', settings: 'warning', other: 'neutral' };
+  var GROUP_ICON = { auth: '♙', vendor: '⚒', customer: '☺', settings: '⚙', promo: '％', other: '◷' };
+  var GROUP_BADGE = { auth: 'info', vendor: 'success', customer: 'info', settings: 'warning', promo: 'success', other: 'neutral' };
   var token = 0;     // tăng mỗi lần vào/rời màn để bỏ qua kết quả bất đồng bộ cũ
   var host = null;   // vùng nội dung của khung admin
   var state = null;  // { all, q, group, range, page }

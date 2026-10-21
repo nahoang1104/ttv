@@ -40,8 +40,29 @@ const KioStore = (() => {
   const rowInflight = new Map();
   const rowEpoch = new Map();
 
+  function listCacheKey(table, where) {
+    if (where && where.length) return table + '::' + JSON.stringify(where);
+    return table;
+  }
+
+  function keyWhere(key) {
+    return [{ field: 'payload', operator: 'LIKE', value: '{"v":2,"k":"' + String(key) + '"%' }];
+  }
+
+  function listRowsByKey(table, key) {
+    return listRows(table, { force: true, where: keyWhere(key) });
+  }
+
+  function rememberDelta(table, key, data) {
+    const st = deltaState.get(table);
+    if (st && data) st.items.set(String(key), data);
+  }
+
   function invalidateTable(table) {
     rowCache.delete(table);
+    Array.from(rowCache.keys()).forEach(function (k) {
+      if (k === table || String(k).indexOf(table + '::') === 0) rowCache.delete(k);
+    });
     rowEpoch.set(table, (rowEpoch.get(table) || 0) + 1);
   }
 
@@ -111,27 +132,28 @@ const KioStore = (() => {
     return parsed && typeof parsed === 'object' ? parsed : null;
   }
 
-  async function listRows(table, { force = false } = {}) {
+  async function listRows(table, { force = false, where } = {}) {
     assertReady();
 
+    const filter = Array.isArray(where) ? where : [];
+    const cacheKey = listCacheKey(table, filter);
     const now = Date.now();
-    const cached = rowCache.get(table);
-    if (!force && cached && (now - cached.at) < ROW_CACHE_TTL) {
+    const ttl = force ? 0 : ROW_CACHE_TTL;
+    const cached = rowCache.get(cacheKey);
+    if (ttl > 0 && cached && (now - cached.at) < ttl) {
       return cached.rows.slice();
     }
 
-    // Nếu cùng bảng đang được đọc, các nơi khác dùng chung Promise thay vì tạo
-    // thêm một list.php mới. Điều này giảm request trùng và tránh KIO tự abort.
-    // Caller `force` đợi request cũ xong rồi đọc lại, không dùng dữ liệu cũ.
-    if (rowInflight.has(table)) {
-      const pending = rowInflight.get(table);
+    // Cùng bảng+điều kiện đang đọc: dùng chung Promise, không tạo list.php thứ hai.
+    if (rowInflight.has(cacheKey)) {
+      const pending = rowInflight.get(cacheKey);
       if (!force) return (await pending).slice();
       await pending.catch(() => {});
     }
 
     if (force) {
-      rowCache.delete(table);
-      rowEpoch.set(table, (rowEpoch.get(table) || 0) + 1);
+      rowCache.delete(cacheKey);
+      if (!filter.length) rowEpoch.set(table, (rowEpoch.get(table) || 0) + 1);
     }
     const epoch = rowEpoch.get(table) || 0;
 
@@ -151,7 +173,7 @@ const KioStore = (() => {
               page,
               limit: PAGE_SIZE,
               sort: { id: 'ASC' },
-              where: [],
+              where: filter,
             });
             lastErr = null;
             break;
@@ -176,16 +198,16 @@ const KioStore = (() => {
       }
 
       if ((rowEpoch.get(table) || 0) === epoch) {
-        rowCache.set(table, { at: Date.now(), rows: out.slice() });
+        rowCache.set(cacheKey, { at: Date.now(), rows: out.slice() });
       }
       return out;
     })();
 
-    rowInflight.set(table, job);
+    rowInflight.set(cacheKey, job);
     try {
       return (await job).slice();
     } finally {
-      if (rowInflight.get(table) === job) rowInflight.delete(table);
+      if (rowInflight.get(cacheKey) === job) rowInflight.delete(cacheKey);
     }
   }
 
@@ -243,9 +265,64 @@ const KioStore = (() => {
   }
 
   async function listCollection(table, opts = {}) {
+    if (opts.delta) return listCollectionDelta(table, opts);
     const rows = await listRows(table, opts);
     const groups = groupRemoteRows(rows);
     return [...groups.values()].map(g => g.data).filter(Boolean);
+  }
+
+  // Gom bản ghi nghiệp vụ giữa các lần đọc: lần đầu list cả bảng, sau đó chỉ lấy
+  // dòng vật lý id > max (KIO where trên cột id). Cột payload là JSON cắt 120 ký tự
+  // nên không lọc được recipient_id phía server cho đủ chunk.
+  const deltaState = new Map();
+
+  function mergeDelta(st, rows) {
+    (rows || []).forEach((row) => {
+      const nid = Number(row && row.id);
+      if (isFinite(nid) && nid > st.maxId) st.maxId = nid;
+    });
+    const groups = groupRemoteRows(rows || []);
+    groups.forEach((g, key) => {
+      if (g.legacy) {
+        if (g.data) st.items.set(key, g.data);
+        st.parts.delete(key);
+        return;
+      }
+      const has0 = (g.parts || []).some((p) => p.i === 0);
+      let acc = st.parts.get(key) || { parts: [] };
+      if (has0 && (st.items.has(key) || acc.parts.length)) acc = { parts: [] };
+      const byI = new Map();
+      acc.parts.forEach((p) => byI.set(p.i, p));
+      (g.parts || []).forEach((p) => byI.set(p.i, p));
+      const parts = [...byI.values()].sort((a, b) => a.i - b.i);
+      let n = 0;
+      parts.forEach((p) => { if (p.n) n = Number(p.n) || n; });
+      if (n && parts.length >= n) {
+        try {
+          const data = JSON.parse(parts.map((p) => p.d).join(''));
+          if (data) st.items.set(key, data);
+        } catch (_) {}
+        st.parts.delete(key);
+      } else {
+        st.parts.set(key, { parts });
+      }
+    });
+  }
+
+  async function listCollectionDelta(table, opts = {}) {
+    let st = deltaState.get(table);
+    if (!st || opts.full) {
+      st = { maxId: 0, items: new Map(), parts: new Map() };
+      deltaState.set(table, st);
+    }
+    var overlap = 32;
+    var cursor = st.maxId > overlap ? st.maxId - overlap : 0;
+    const where = cursor > 0
+      ? [{ field: 'id', operator: '>', value: cursor }]
+      : [];
+    const rows = await listRows(table, { force: true, where });
+    mergeDelta(st, rows);
+    return [...st.items.values()];
   }
 
   let payloadFormSeq = 0;
@@ -337,52 +414,67 @@ const KioStore = (() => {
     return true;
   }
 
-  // Đồng bộ theo key nghiệp vụ: thêm record thiếu, thay record thay đổi;
-  // không tự xóa record server chỉ vì frontend chưa có record đó.
-  async function syncCollection(table, items) {
+  function missingRemoteTable(err) {
+    return /42S02|1146|doesn'?t exist|does not exist|unknown table|Không đọc được bảng/i.test(String((err && err.message) || err || ''));
+  }
 
+  // Ghi 1–n bản ghi: chỉ LIKE đúng khóa, không list cả bảng.
+  async function upsertItems(table, items) {
     assertReady();
-
     const local = (Array.isArray(items) ? items : []).map(encodeItem);
-
-    const remoteRows = await listRows(table);
-    const remoteGroups = groupRemoteRows(remoteRows);
-
     for (const encoded of local) {
-
-        const remote = remoteGroups.get(encoded.key);
-
-        if (!remote) {
-
-            await insertEncoded(table, encoded);
-
-            continue;
-        }
-
-        if (remote.raw !== encoded.raw || remote.legacy) {
-
-            await deleteRows(table, remote.rows);
-
-            await insertEncoded(table, encoded);
-        }
+      let remoteRows = [];
+      try {
+        remoteRows = await listRowsByKey(table, encoded.key);
+      } catch (err) {
+        if (!missingRemoteTable(err)) throw err;
+        await insertEncoded(table, encoded);
+        try { rememberDelta(table, encoded.key, JSON.parse(encoded.raw)); } catch (_) {}
+        continue;
+      }
+      const remote = groupRemoteRows(remoteRows).get(encoded.key);
+      if (!remote) {
+        await insertEncoded(table, encoded);
+      } else if (remote.raw !== encoded.raw || remote.legacy) {
+        await deleteRows(table, remote.rows);
+        await insertEncoded(table, encoded);
+      }
+      try { rememberDelta(table, encoded.key, JSON.parse(encoded.raw)); } catch (_) {}
     }
-
     return true;
   }
 
+  // Đồng bộ theo key nghiệp vụ: thêm record thiếu, thay record thay đổi;
+  // không tự xóa record server chỉ vì frontend chưa có record đó.
+  async function syncCollection(table, items) {
+    return upsertItems(table, items);
+  }
+
   // [DATA CLEANUP] Xóa chính xác một hoặc nhiều record theo khóa nghiệp vụ.
-  // Chỉ dùng cho cleanup dữ liệu trùng đã được người dùng yêu cầu; KHÔNG dùng
-  // để suy luận/xóa tự động các record chỉ vì frontend không nhìn thấy chúng.
   async function deleteKeys(table, keys) {
     assertReady();
-    const wanted = new Set((Array.isArray(keys) ? keys : [keys]).map(String).filter(Boolean));
-    if (!wanted.size) return true;
-    const rows = await listRows(table);
-    const groups = groupRemoteRows(rows);
-    for (const key of wanted) {
-      const group = groups.get(String(key));
-      if (group) await deleteRows(table, group.rows);
+    const wanted = [...new Set((Array.isArray(keys) ? keys : [keys]).map(String).filter(Boolean))];
+    if (!wanted.length) return true;
+    if (wanted.length > 8) {
+      const rows = await listRows(table);
+      const groups = groupRemoteRows(rows);
+      for (const key of wanted) {
+        const group = groups.get(String(key));
+        if (group) await deleteRows(table, group.rows);
+      }
+    } else {
+      for (const key of wanted) {
+        let rows = [];
+        try { rows = await listRowsByKey(table, key); } catch (err) {
+          if (missingRemoteTable(err)) continue;
+          throw err;
+        }
+        const group = groupRemoteRows(rows).get(key);
+        if (group) await deleteRows(table, group.rows);
+      }
     }
+    const st = deltaState.get(table);
+    if (st) wanted.forEach((k) => { st.items.delete(k); st.parts.delete(k); });
     return true;
   }
 
@@ -394,6 +486,7 @@ const KioStore = (() => {
     if (rows.length) await deleteRows(table, rows);
     const local = (Array.isArray(items) ? items : []).map(encodeItem);
     for (const encoded of local) await insertEncoded(table, encoded);
+    deltaState.delete(table);
     invalidateTable(table);
     return true;
   }
@@ -403,7 +496,7 @@ const KioStore = (() => {
   }
 
   async function loadSingleton(table, key) {
-    const rows = await listCollection(table);
+    const rows = await listCollection(table, { where: keyWhere(key), force: true });
     return rows.find(x => String(x?.id) === String(key)) || null;
   }
 
@@ -411,6 +504,7 @@ const KioStore = (() => {
     listRows,
     listCollection,
     syncCollection,
+    upsertItems,
     appendCollection,
     deleteKeys,
     replaceCollection,

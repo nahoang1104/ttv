@@ -470,40 +470,85 @@ window.TTV = window.TTV || {};
     var v = row && row.is_read;
     return v === true || v === 1 || v === '1' || v === 'true';
   }
-  /* ----- Mốc thông báo ("có gì mới không") + giới hạn hộp thư -----
-     Mỗi người có 1 bản ghi nhỏ ở bảng noti_marks: { id: 'vendor:<id>', t: mã ngẫu nhiên }. Mọi thay đổi hộp thư (thêm, đọc, xóa, dọn)
-     đổi `t`. Poll chỉ đọc bảng nhỏ này; `t` không đổi thì KHÔNG tải lại bảng notifications (rất nặng trên KIO). */
-  var NOTI_KEEP_DAYS = 30, NOTI_KEEP_MAX = 100;
+  /* ----- Mốc thông báo -----
+     { id: 'vendor:<id>', t, del }. Poll LIKE prefix payload "k". t đổi = có tin mới (delta);
+     del tăng khi xóa/dọn → client đọc lại cả hộp. KIO không có cột khóa người nhận nên không dùng =. */
+  var NOTI_KEEP_DAYS = 20, NOTI_KEEP_MAX = 100; // giữ 100 mới nhất; tin cũ hơn 20 ngày chỉ mất khi đã có 100 tin mới hơn
   function notiMarkId(box) { return box.type + ':' + box.id; }
-  function bumpNotiStamp(type, id) {
+  function bumpNotiStamp(type, id, removed) {
+    var mid = notiMarkId({ type: type, id: String(id) });
     var stamp = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-    return store().put('noti_marks', { id: notiMarkId({ type: type, id: String(id) }), t: stamp }).catch(function () {});
+    return store().get('noti_marks', mid, { force: true }).then(function (row) {
+      var del = Number(row && row.del) || 0;
+      if (removed) del += 1;
+      return store().put('noti_marks', { id: mid, t: stamp, del: del });
+    }).catch(function () {
+      return store().put('noti_marks', { id: mid, t: stamp, del: removed ? 1 : 0 });
+    });
   }
   api.getNotiStamp = function () {
     var box = notiInbox();
-    if (!box) return Promise.resolve('');
-    return store().get('noti_marks', notiMarkId(box), { force: true }).then(function (row) { return row ? String(row.t || '') : ''; });
+    if (!box) return Promise.resolve({ t: '', del: 0 });
+    return store().get('noti_marks', notiMarkId(box), { force: true }).then(function (row) {
+      return { t: row ? String(row.t || '') : '', del: Number(row && row.del) || 0 };
+    }).catch(function () { return { t: '', del: 0 }; });
   };
-  // Chia hộp thư: giữ thông báo ≤ 30 ngày và tối đa 100 cái mới nhất; phần còn lại là `drop` (sẽ bị xóa).
+  // Giữ 100 tin mới nhất (kể cả cũ hơn 20 ngày). Chỉ xóa phần vượt 100.
   function notiSplit(rows) {
-    var cutoff = Date.now() - NOTI_KEEP_DAYS * 86400000, keep = [], drop = [];
-    rows.slice().sort(function (a, b) { return String(b.created_at || '').localeCompare(String(a.created_at || '')); }).forEach(function (r) {
-      var ts = Date.parse(r.created_at);
-      if ((isFinite(ts) && ts < cutoff) || keep.length >= NOTI_KEEP_MAX) drop.push(r); else keep.push(r);
+    var keep = [], drop = [];
+    rows.slice().sort(function (a, b) { return String(b.created_at || '').localeCompare(String(a.created_at || '')); }).forEach(function (r, i) {
+      if (i < NOTI_KEEP_MAX) keep.push(r);
+      else drop.push(r);
     });
     return { keep: keep, drop: drop };
   }
   var pruneBusy = false;
   function pruneInboxLater(box, drop) {
     if (pruneBusy || !drop.length) return;
+    if (TTV.NotiLive && typeof TTV.NotiLive.canPrune === 'function' && !TTV.NotiLive.canPrune()) return;
     pruneBusy = true;
     store().removeAll('notifications', drop.map(function (r) { return r.id; }))
-      .then(function () { return bumpNotiStamp(box.type, box.id); })
+      .then(function () { return bumpNotiStamp(box.type, box.id, true); })
       .catch(function () {})
       .then(function () { pruneBusy = false; });
   }
-  function pingLive(topic) {
-    if (TTV.Live && typeof TTV.Live.ping === 'function') TTV.Live.ping(topic);
+  var ORDERS_STAMP_ID = 'orders_stamp';
+  function bumpOrdersStamp(removed) {
+    var stamp = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+    return store().get('__meta', ORDERS_STAMP_ID).then(function (row) {
+      var del = Number(row && row.del) || 0;
+      if (removed) del += 1;
+      return store().put('__meta', { id: ORDERS_STAMP_ID, t: stamp, del: del });
+    }).catch(function () {
+      return store().put('__meta', { id: ORDERS_STAMP_ID, t: stamp, del: removed ? 1 : 0 });
+    });
+  }
+  api.getOrdersStamp = function () {
+    return store().get('__meta', ORDERS_STAMP_ID, { force: true }).then(function (row) {
+      return { t: row ? String(row.t || '') : '', del: Number(row && row.del) || 0 };
+    }).catch(function () { return { t: '', del: 0 }; });
+  };
+  api.pingLive = pingLive;
+  function ordersStampKey(s) { return String((s && s.t) || '') + ':' + (Number(s && s.del) || 0); }
+  function peekOrdersLive(opts) {
+    opts = opts || {};
+    return api.getOrdersStamp().then(function (s) {
+      var key = ordersStampKey(s);
+      if (opts.poll && opts.since && opts.since === key && !opts.full) return { skip: true, stamp: key };
+      var prevDel = opts.since ? String(opts.since).split(':')[1] : null;
+      return {
+        skip: false,
+        full: !!opts.full || (prevDel != null && prevDel !== String(s.del)),
+        stamp: key
+      };
+    });
+  }
+  function pingLive(topic, removed) {
+    function send() {
+      if (TTV.Live && typeof TTV.Live.ping === 'function') TTV.Live.ping(topic);
+    }
+    if (topic === 'orders') return bumpOrdersStamp(!!removed).then(send, send);
+    send();
   }
   function background(p) {
     if (p && typeof p.then === 'function') p.catch(function () {});
@@ -531,7 +576,7 @@ window.TTV = window.TTV || {};
     if (row.href) return row.href;
     return defaultNotiHref(type, row.order_id, ev);
   };
-  // Ghi 1 dòng / (event + đơn + người nhận) khi chưa đọc.
+  // Ghi thông báo. quote.new: 1 dòng / (đơn + thợ) — hai thợ báo = hai tin. Không quét cả hộp thư.
   api.pushNotification = function (input) {
     input = input || {};
     if (!input.recipient_id) return Promise.resolve([]);
@@ -540,16 +585,17 @@ window.TTV = window.TTV || {};
       id: String(input.recipient_id)
     };
     var now = new Date().toISOString();
-    var key = input.event ? [input.event, input.order_id || '', t.type, t.id].join(':') : '';
-    // Lấy cả hộp thư của người nhận (1 lần đọc bảng): vừa tìm dòng trùng (dedupe), vừa để dọn bớt thông báo cũ.
-    var findMine = key
-      ? store().query('notifications', function (r) {
-        return String(r.recipient_id) === t.id && (r.recipient_type || 'customer') === t.type;
-      }).then(function (rows) { return rows || []; })
-      : Promise.resolve([]);
-    return findMine.then(function (mine) {
-      var prev = null;
-      mine.some(function (r) { if (r.dedupe_key === key && !notiIsRead(r)) { prev = r; return true; } return false; });
+    var extra = String(input.actor_id || input.quote_id || '');
+    var key = input.event
+      ? (extra
+        ? [input.event, input.order_id || '', extra, t.type, t.id]
+        : [input.event, input.order_id || '', t.type, t.id]).join(':')
+      : '';
+    function finish(saved) {
+      if (!input.silent) pingLive('noti');
+      return saved;
+    }
+    function saveRow(prev, mine) {
       var row = prev ? Object.assign({}, prev) : {
         id: TTV.Utils.id(),
         is_read: false,
@@ -566,18 +612,35 @@ window.TTV = window.TTV || {};
       row.created_at = now;
       row.updated_at = now;
       return store().put('notifications', row).then(function (saved) {
-        var rest = mine.filter(function (r) { return String(r.id) !== String(saved.id); });
-        var drop = notiSplit([saved].concat(rest).map(function (r) { return Object.assign({}, r); })).drop;
+        var rest = (mine || []).filter(function (r) { return String(r.id) !== String(saved.id); });
+        var drop = rest.length
+          ? notiSplit([saved].concat(rest).map(function (r) { return Object.assign({}, r); })).drop
+          : [];
         var cleanup = drop.length
           ? store().removeAll('notifications', drop.map(function (r) { return r.id; })).catch(function () {})
           : Promise.resolve();
-        // Mốc chỉ đổi SAU khi dữ liệu đã ghi xong: máy khác thấy mốc mới thì chắc chắn đọc được thông báo mới.
-        return cleanup.then(function () { return bumpNotiStamp(t.type, t.id); }).then(function () { return saved; });
+        return cleanup.then(function () { return bumpNotiStamp(t.type, t.id, !!drop.length); }).then(function () { return saved; });
       });
-    }).then(function (saved) {
-      if (!input.silent) pingLive('noti');
-      return saved;
-    });
+    }
+    if (input.event === 'quote.new' && input.order_id && extra) {
+      var nid = 'qn-' + String(input.order_id) + '-' + extra;
+      return store().get('notifications', nid, { force: true }).then(function (prev) {
+        if (prev && notiIsRead(prev)) prev = null;
+        if (!prev) prev = { id: nid, is_read: false, recipient_type: t.type, recipient_id: t.id };
+        return saveRow(prev, []);
+      }).then(finish);
+    }
+    // Sự kiện khác: gộp 1 dòng / (event + đơn + người nhận) khi chưa đọc.
+    var findMine = key
+      ? store().query('notifications', function (r) {
+        return String(r.recipient_id) === t.id && (r.recipient_type || 'customer') === t.type;
+      }, { delta: true }).then(function (rows) { return rows || []; })
+      : Promise.resolve([]);
+    return findMine.then(function (mine) {
+      var prev = null;
+      mine.some(function (r) { if (r.dedupe_key === key && !notiIsRead(r)) { prev = r; return true; } return false; });
+      return saveRow(prev, mine);
+    }).then(finish);
   };
   function notiSettingsDefaults() {
     return { order: true, promo: true, system: true, sound_vibrate: true };
@@ -610,11 +673,12 @@ window.TTV = window.TTV || {};
   api.listMyNotifications = function (opts) {
     var box = notiInbox();
     if (!box) return Promise.resolve([]);
-    return store().query('notifications', function (r) { return isMyNotification(r, box); }, opts || {}).then(function (rows) {
+    opts = Object.assign({ delta: true }, opts || {});
+    return store().query('notifications', function (r) { return isMyNotification(r, box); }, opts).then(function (rows) {
       var split = notiSplit((rows || []).map(function (r) {
         return Object.assign({}, r, { is_read: notiIsRead(r) });
       }));
-      pruneInboxLater(box, split.drop); // quá 30 ngày / quá 100 cái: ẩn ngay, xóa thật ở nền
+      pruneInboxLater(box, split.drop);
       return split.keep;
     });
   };
@@ -626,7 +690,7 @@ window.TTV = window.TTV || {};
       if (!row || !isMyNotification(row, box)) throw fail('NOT_FOUND', 'Không tìm thấy thông báo.');
       if (notiIsRead(row)) return Object.assign({}, row, { is_read: true });
       return store().put('notifications', Object.assign({}, row, { is_read: true })).then(function (saved) {
-        return bumpNotiStamp(box.type, box.id).then(function () { return saved; });
+        return bumpNotiStamp(box.type, box.id, false).then(function () { return saved; });
       });
     });
   };
@@ -641,7 +705,7 @@ window.TTV = window.TTV || {};
       if (!unread.length) return 0;
       return store().putAll('notifications', unread).then(function () {
         if (store().invalidate) store().invalidate(['notifications']);
-        return bumpNotiStamp(box.type, box.id).then(function () { return unread.length; });
+        return bumpNotiStamp(box.type, box.id, false).then(function () { return unread.length; });
       });
     });
   };
@@ -649,8 +713,8 @@ window.TTV = window.TTV || {};
     var box = notiInbox();
     if (!box) return Promise.reject(fail('UNAUTH', 'Hãy đăng nhập.'));
     return store().get('notifications', id).then(function (row) {
-      if (!row || !isMyNotification(row, box)) throw fail('NOT_FOUND', 'Không tìm thấy thông báo.');
-      return store().remove('notifications', id).then(function () { return bumpNotiStamp(box.type, box.id); }).then(function () { pingLive('noti'); });
+      if (!row || !isMyNotification(row, box)) return true;
+      return store().remove('notifications', id).then(function () { return bumpNotiStamp(box.type, box.id, true); }).then(function () { pingLive('noti'); return true; });
     });
   };
 
@@ -1345,17 +1409,25 @@ window.TTV = window.TTV || {};
   //  ongoing.pendingQuotes            : báo giá `pending` mà đơn còn `finding`.
   //  ongoing.activeJobs               : đơn của thợ đang `matched` / `arriving` / `working`.
   //  readiness.online                 : đang bật VÀ ví chưa âm quá ngưỡng (nơi khác dùng để lọc thợ nhận đơn phải xét cả ví).
-  api.getVendorDashboard = function () {
-    var vid;
-    return requireVendorSelf().then(function (id) {
+  api.getVendorDashboard = function (opts) {
+    opts = opts || {};
+    var vid, livePeek;
+    return peekOrdersLive(opts).then(function (peek) {
+      livePeek = peek;
+      if (peek.skip) return { unchanged: true, stamp: peek.stamp };
+      return requireVendorSelf();
+    }).then(function (id) {
+      if (id && id.unchanged) return id;
       vid = id;
+      var qOpts = { delta: true, full: !!(opts.full || (livePeek && livePeek.full)) };
       return Promise.all([
         TTV.Store.get('vendors', id),
-        TTV.Store.query('orders', function (o) { return String(o.vendor_id) === id || o.status === 'finding'; }),
-        TTV.Store.query('quotes', function (q) { return String(q.vendor_id) === id && q.status === 'pending'; }),
+        TTV.Store.query('orders', function (o) { return String(o.vendor_id) === id || o.status === 'finding'; }, qOpts),
+        TTV.Store.query('quotes', function (q) { return String(q.vendor_id) === id && q.status === 'pending'; }, qOpts),
         vendorWalletLimit()
       ]);
     }).then(function (parts) {
+      if (parts && parts.unchanged) return parts;
       var row = parts[0], orders = parts[1] || [], quotes = parts[2] || [], limit = parts[3];
       if (!row) throw notFoundVendor();
       if ((row.status || 'active') === 'locked') throw fail('LOCKED', 'Tài khoản của bạn đang bị khóa. Vui lòng liên hệ quản trị viên.');
@@ -1387,6 +1459,7 @@ window.TTV = window.TTV || {};
         };
       }
       return {
+        stamp: livePeek && livePeek.stamp,
         vendor: publicVendor(row),
         today: { date: new Date(range.from).toISOString(), completed: completed, earnings: earnings },
         ongoing: { pendingQuotes: pendingQuotes, activeJobs: activeJobs },
@@ -1404,8 +1477,16 @@ window.TTV = window.TTV || {};
   var ACTIVE_JOB = { matched: 1, arriving: 1, working: 1, completed: 1 };
   var LIVE_JOB = { matched: 1, arriving: 1, working: 1 }; // đơn đang làm — cá nhân chỉ được 1 cái
 
-  // Thợ cá nhân: 1 slot (đơn matched/arriving/working, hoặc báo giá pending đơn khác). exceptId = đơn đang xem/sửa thì không tính.
-  function personalSlot(vendor, liveOrders, quotes, exceptId) {
+  // Đơn finding còn hạn — báo giá pending trên đơn đã hủy/hết hạn/ghép không còn giữ slot thợ cá nhân.
+  function openFindingMap(rows, windowMin, now) {
+    var m = {}, t = now == null ? Date.now() : now;
+    (rows || []).forEach(function (o) {
+      if (o && o.status === 'finding' && deadlineMs(o, windowMin) > t) m[String(o.id)] = true;
+    });
+    return m;
+  }
+  // Thợ cá nhân: 1 slot (đơn matched/arriving/working, hoặc báo giá pending của đơn finding còn hạn). exceptId = đơn đang xem/sửa thì không tính.
+  function personalSlot(vendor, liveOrders, quotes, exceptId, openFinding) {
     if (!vendor || vendor.type !== 'personal') return null;
     exceptId = exceptId ? String(exceptId) : '';
     var job = (liveOrders || []).filter(function (o) {
@@ -1413,7 +1494,9 @@ window.TTV = window.TTV || {};
     })[0];
     if (job) return { kind: 'job', order_id: String(job.id), code: TTV.Utils.orderCode(job.id) };
     var q = (quotes || []).filter(function (row) {
-      return row.status === 'pending' && String(row.order_id) !== exceptId;
+      if (row.status !== 'pending' || String(row.order_id) === exceptId) return false;
+      if (openFinding && !openFinding[String(row.order_id)]) return false;
+      return true;
     })[0];
     if (q) return { kind: 'quote', order_id: String(q.order_id), code: TTV.Utils.orderCode(q.order_id) };
     return null;
@@ -1438,6 +1521,54 @@ window.TTV = window.TTV || {};
     var size = Math.max(1, Number(v && v.team_size) || 1);
     if (!v || v.type === 'personal') return size;
     return Math.max(0, size - teamBusyWorkers(liveOrders, exceptId));
+  }
+  // Báo giá còn hiện với khách khi nhà cung cấp vẫn nhận được đơn này (chưa khóa, còn người rảnh).
+  function vendorOpenForOrder(order, vendor, liveJobs) {
+    if (!order || !vendor || (vendor.status || 'active') === 'locked') return false;
+    liveJobs = liveJobs || [];
+    if (vendor.type === 'personal') return !liveJobs.length;
+    return jobWorkers(order) <= teamFree(vendor, liveJobs, order.id);
+  }
+  // Khi vừa ghép đơn: gỡ báo giá pending ở đơn khác mà thợ/đội không còn đủ người.
+  function releaseUnavailableQuotes(vendor, matchedOrder) {
+    var vid = String(vendor && vendor.id || ''), except = String(matchedOrder && matchedOrder.id || '');
+    if (!vid) return Promise.resolve();
+    return Promise.all([
+      TTV.Store.query('quotes', function (q) {
+        return String(q.vendor_id) === vid && q.status === 'pending' && String(q.order_id) !== except;
+      }, { delta: true }),
+      TTV.Store.query('orders', function (row) {
+        return String(row.vendor_id) === vid && LIVE_JOB[row.status];
+      }, { delta: true })
+    ]).then(function (p) {
+      var pending = p[0] || [], jobs = p[1] || [];
+      if (!pending.length) return;
+      var want = {};
+      pending.forEach(function (q) { want[String(q.order_id)] = true; });
+      return TTV.Store.query('orders', function (o) { return !!want[String(o.id)]; }, { force: true }).then(function (rows) {
+        var omap = {};
+        (rows || []).forEach(function (o) { omap[String(o.id)] = o; });
+        var now = new Date().toISOString();
+        var drop = pending.filter(function (q) {
+          var o = omap[String(q.order_id)];
+          return o && o.status === 'finding' && !vendorOpenForOrder(o, vendor, jobs);
+        });
+        return drop.reduce(function (chain, q) {
+          return chain.then(function () {
+            return TTV.Store.put('quotes', Object.assign({}, q, { status: 'expired', updated_at: now })).then(function () {
+              var o = omap[String(q.order_id)];
+              if (!o || !o.user_id) return;
+              return api.pushNotification({
+                event: 'quote.unavailable', category: 'order',
+                title: 'Báo giá không còn hiệu lực',
+                body: 'Nhà cung cấp vừa nhận đơn khác nên báo giá trên đơn ' + TTV.Utils.orderCode(o.id) + ' đã được gỡ.',
+                order_id: o.id, recipient_type: 'customer', recipient_id: String(o.user_id)
+              });
+            });
+          });
+        }, Promise.resolve());
+      });
+    });
   }
 
   // Bỏ dấu + chữ thường để so khớp địa chỉ với khu vực của thợ.
@@ -1553,18 +1684,25 @@ window.TTV = window.TTV || {};
   // Chợ đơn: đơn `finding` còn hạn, khớp hồ sơ thợ. Thợ đang tắt "Sẵn sàng nhận đơn" hoặc ví âm quá ngưỡng thì không thấy đơn nào (ready=false).
   api.listMarketOrders = function (opts) {
     opts = opts || {};
-    var vid;
-    return requireVendorSelf().then(function (id) {
+    var vid, livePeek;
+    return peekOrdersLive(opts).then(function (peek) {
+      livePeek = peek;
+      if (peek.skip) return { unchanged: true, stamp: peek.stamp };
+      return requireVendorSelf();
+    }).then(function (id) {
+      if (id && id.unchanged) return id;
       vid = id;
+      var qOpts = { delta: true, full: !!(opts.full || (livePeek && livePeek.full)) };
       return Promise.all([
         TTV.Store.get('vendors', id), vendorWalletLimit(),
         TTV.Store.query('orders', function (o) {
           return o.status === 'finding' || (String(o.vendor_id) === id && LIVE_JOB[o.status]);
-        }),
-        TTV.Store.query('quotes', function (q) { return String(q.vendor_id) === id; }),
+        }, qOpts),
+        TTV.Store.query('quotes', function (q) { return String(q.vendor_id) === id; }, qOpts),
         api.listServices(), TTV.Store.get('pricing_config', 'default')
       ]);
     }).then(function (p) {
+      if (p && p.unchanged) return p;
       var row = p[0], limit = p[1], rows = p[2] || [], quotes = p[3] || [];
       if (!row) throw notFoundVendor();
       if ((row.status || 'active') === 'locked') throw fail('LOCKED', 'Tài khoản của bạn đang bị khóa. Vui lòng liên hệ quản trị viên.');
@@ -1576,7 +1714,8 @@ window.TTV = window.TTV || {};
       });
       var env = marketEnv(p[5], p[4], quotes), list = [];
       var blockedWorkers = 0, blockedCapacity = 0;
-      var hold = personalSlot(row, live, quotes, '');
+      var openFinding = openFindingMap(finding, env.windowMin, env.now);
+      var hold = personalSlot(row, live, quotes, '', openFinding);
       var size = Math.max(1, Number(row.team_size) || 1);
       var left = teamFree(row, live, '');
       if (ready && !(hold && hold.kind === 'job')) {
@@ -1593,6 +1732,7 @@ window.TTV = window.TTV || {};
         });
       }
       return {
+        stamp: livePeek && livePeek.stamp,
         vendor: publicVendor(row),
         readiness: { online: !!row.is_online, blocked: blocked, ready: ready, limit: limit },
         orders: api.sortMarketOrders(list, opts.sort || 'newest'),
@@ -1603,6 +1743,8 @@ window.TTV = window.TTV || {};
           finding: finding.length,
           busy_job: !!(hold && hold.kind === 'job'),
           busy_code: hold && hold.kind === 'job' ? hold.code : '',
+          quote_hold: !!(hold && hold.kind === 'quote'),
+          quote_code: hold && hold.kind === 'quote' ? hold.code : '',
           team_free: left,
           team_size: size,
           team_busy: row.type !== 'personal' && left < size
@@ -1612,17 +1754,26 @@ window.TTV = window.TTV || {};
   };
 
   // Việc của tôi: đơn đã ghép cho chính thợ (matched / arriving / working).
-  api.listVendorJobs = function () {
-    return requireVendorSelf().then(function (id) {
+  api.listVendorJobs = function (opts) {
+    opts = opts || {};
+    var livePeek;
+    return peekOrdersLive(opts).then(function (peek) {
+      livePeek = peek;
+      if (peek.skip) return { unchanged: true, stamp: peek.stamp };
+      return requireVendorSelf();
+    }).then(function (id) {
+      if (id && id.unchanged) return id;
+      var qOpts = { delta: true, full: !!(opts.full || (livePeek && livePeek.full)) };
       return Promise.all([
         TTV.Store.query('orders', function (o) {
           return String(o.vendor_id) === id && (o.status === 'matched' || o.status === 'arriving' || o.status === 'working');
-        }),
-        TTV.Store.query('quotes', function (q) { return String(q.vendor_id) === id; }),
+        }, qOpts),
+        TTV.Store.query('quotes', function (q) { return String(q.vendor_id) === id; }, qOpts),
         api.listServices(),
         TTV.Store.get('pricing_config', 'default')
       ]);
     }).then(function (p) {
+      if (p && p.unchanged) return p;
       var env = marketEnv(p[3], p[2], p[1]);
       var list = (p[0] || []).map(function (o) {
         var view = marketView(o, env);
@@ -1633,7 +1784,7 @@ window.TTV = window.TTV || {};
       list.sort(function (a, b) {
         return String(b.matched_at || '').localeCompare(String(a.matched_at || ''));
       });
-      return { jobs: list };
+      return { stamp: livePeek && livePeek.stamp, jobs: list };
     });
   };
 
@@ -1761,7 +1912,9 @@ window.TTV = window.TTV || {};
         TTV.Store.query('quotes', function (q) { return String(q.vendor_id) === id; }),
         TTV.Store.query('order_media', function (m) { return String(m.order_id) === oid; }),
         api.listServices(), TTV.Store.get('pricing_config', 'default'),
-        TTV.Store.query('orders', function (o) { return String(o.vendor_id) === id && LIVE_JOB[o.status]; })
+        TTV.Store.query('orders', function (o) {
+          return o.status === 'finding' || (String(o.vendor_id) === id && LIVE_JOB[o.status]);
+        })
       ]);
     }).then(function (p) {
       var row = p[0], limit = p[1], o = p[2];
@@ -1770,12 +1923,17 @@ window.TTV = window.TTV || {};
       if (!o) throw fail('ORDER_NOT_FOUND', 'Không tìm thấy đơn này.');
       var mineQuotes = (p[3] || []).filter(function (q) { return String(q.order_id) === oid; });
       var env = marketEnv(p[6], p[5], mineQuotes);
+      var live = [], finding = [];
+      (p[7] || []).forEach(function (rowO) {
+        if (LIVE_JOB[rowO.status] && String(rowO.vendor_id) === vid) live.push(rowO);
+        if (rowO.status === 'finding') finding.push(rowO);
+      });
       var mine = String(o.vendor_id || '') === vid, hasQuote = mineQuotes.length > 0;
       var open = o.status === 'finding' && deadlineMs(o, env.windowMin) > env.now;
-      var fits = orderFitsVendor(o, row, p[7] || [], oid);
-      var whyFit = fits ? '' : fitReason(o, row, p[7] || [], oid);
+      var fits = orderFitsVendor(o, row, live, oid);
+      var whyFit = fits ? '' : fitReason(o, row, live, oid);
       var taken = o.status === 'matched' || o.status === 'arriving' || o.status === 'working' || o.status === 'completed';
-      var hold = personalSlot(row, p[7] || [], p[3] || [], oid);
+      var hold = personalSlot(row, live, p[3] || [], oid, openFindingMap(finding, env.windowMin, env.now));
       if (!mine) {
         if (taken) {
           if (hasQuote) throw fail('MATCHED_OTHER', 'Đơn ' + TTV.Utils.orderCode(o.id) + ' đã được ghép với thợ khác.');
@@ -1949,11 +2107,18 @@ window.TTV = window.TTV || {};
       if (vendorWalletBlocked(c.vendor, c.limit)) throw fail('WALLET_LOCKED', 'Số dư ví đang âm quá ngưỡng nên bạn tạm không báo giá được.');
       if (cur && cur.status === 'accepted') throw fail('QUOTE_LOCKED', 'Báo giá của bạn đã được chọn, không sửa được nữa.');
       return Promise.all([
-        TTV.Store.query('orders', function (row) { return String(row.vendor_id) === c.vid && LIVE_JOB[row.status]; }, { force: true }),
+        TTV.Store.query('orders', function (row) {
+          return row.status === 'finding' || (String(row.vendor_id) === c.vid && LIVE_JOB[row.status]);
+        }, { force: true }),
         TTV.Store.query('quotes', function (q) { return String(q.vendor_id) === c.vid && q.status === 'pending'; })
       ]).then(function (extra) {
-        if (personalSlot(c.vendor, extra[0], extra[1], c.oid)) throw busyJobFail();
-        var why = fitReason(o, c.vendor, extra[0], c.oid);
+        var live = [], finding = [];
+        (extra[0] || []).forEach(function (rowO) {
+          if (LIVE_JOB[rowO.status] && String(rowO.vendor_id) === c.vid) live.push(rowO);
+          if (rowO.status === 'finding') finding.push(rowO);
+        });
+        if (personalSlot(c.vendor, live, extra[1], c.oid, openFindingMap(finding, c.cfg.quote_window_min))) throw busyJobFail();
+        var why = fitReason(o, c.vendor, live, c.oid);
         if (why) throw fail('NOT_ELIGIBLE', why);
         var cap = api.currentOffer(o), min = Math.max(1, Math.round(Number(c.cfg.min_amount) || 10000));
         var v = validateQuoteInput(input, cap, min);
@@ -1970,8 +2135,8 @@ window.TTV = window.TTV || {};
             if (isNew && o.user_id) {
               background(api.pushNotification({
                 event: 'quote.new', category: 'order', title: 'Có báo giá mới',
-                body: 'Đơn ' + TTV.Utils.orderCode(c.oid) + ' có báo giá mới.',
-                order_id: c.oid, recipient_type: 'customer', recipient_id: o.user_id
+                body: (c.vendor.name || 'Thợ') + ' đã báo giá đơn ' + TTV.Utils.orderCode(c.oid) + '.',
+                order_id: c.oid, actor_id: c.vid, recipient_type: 'customer', recipient_id: o.user_id
               }));
             }
             return row;
@@ -2212,16 +2377,18 @@ window.TTV = window.TTV || {};
         }, Promise.resolve()).then(function () { if (jobs.length) pingLive('noti'); })
       );
       return closePendingQuotes(fresh.id, 'expired', now);
-    }).then(function () { pingLive('orders'); return next; });
+    }).then(function () { pingLive('orders', true); return next; });
   }
   // Đổi mọi báo giá `pending` của đơn sang trạng thái mới (expired/rejected), trừ báo giá có id = exceptId.
   function closePendingQuotes(orderId, status, now, exceptId) {
-    return TTV.Store.query('quotes', function (q) { return String(q.order_id) === String(orderId) && q.status === 'pending' && String(q.id) !== String(exceptId || ''); })
-      .then(function (rows) {
-        return rows.reduce(function (chain, q) {
-          return chain.then(function () { return TTV.Store.put('quotes', Object.assign({}, q, { status: status, updated_at: now })); });
-        }, Promise.resolve()).then(function () { return rows; });
-      });
+    return TTV.Store.query('quotes', function (q) {
+      return String(q.order_id) === String(orderId) && q.status === 'pending' && String(q.id) !== String(exceptId || '');
+    }, { delta: true }).then(function (rows) {
+      if (!(rows || []).length) return rows || [];
+      return TTV.Store.putAll('quotes', rows.map(function (q) {
+        return Object.assign({}, q, { status: status, updated_at: now });
+      })).then(function () { return rows; });
+    });
   }
 
   api.listOrderMedia = function (id) {
@@ -2523,29 +2690,48 @@ window.TTV = window.TTV || {};
   };
   /* ===== 5.6 Màn "Đang nhận báo giá" (khách): xem báo giá của mọi thợ/tổ đội/công ty, tự chọn ===== */
   // Khách chỉ thấy báo giá `pending` (đơn đang `finding`) hoặc báo giá `accepted` (đơn đã ghép). SĐT thợ chỉ có ở báo giá đã được chọn.
-  api.listOrderQuotes = function (id) {
-    var oid = String(id);
-    return api.getOrder(oid).then(function (order) {
-      return Promise.all([
-        TTV.Store.query('quotes', function (q) { return String(q.order_id) === oid; }),
-        TTV.Store.list('vendors')
-      ]).then(function (p) {
-        var vmap = {}; (p[1] || []).forEach(function (v) { vmap[String(v.id)] = v; });
+  api.listOrderQuotes = function (id, opts) {
+    opts = opts || {};
+    var oid = String(id), livePeek;
+    return peekOrdersLive(opts).then(function (peek) {
+      livePeek = peek;
+      if (peek.skip) return { unchanged: true, stamp: peek.stamp };
+      return api.getOrder(oid);
+    }).then(function (order) {
+      if (order && order.unchanged) return order;
+      var qOpts = { delta: true, full: !!(opts.full || (livePeek && livePeek.full)) };
+      return TTV.Store.query('quotes', function (q) { return String(q.order_id) === oid; }, qOpts).then(function (rows) {
         var want = order.status === 'finding' ? 'pending' : 'accepted';
-        var list = (p[0] || []).filter(function (q) { return q.status === want; }).map(function (q) {
-          var v = vmap[String(q.vendor_id)] || {};
-          return {
-            id: String(q.id), order_id: oid, vendor_id: String(q.vendor_id), price: Number(q.price) || 0, eta_min: Number(q.eta_min) || 0,
-            message: String(q.message || ''), status: q.status, created_at: q.created_at, updated_at: q.updated_at,
-            vendor: {
-              id: String(q.vendor_id), name: v.name || '', type: v.type || 'personal', team_size: Number(v.team_size) || 1,
-              rating: Number(v.rating) || 0, jobs_done: Number(v.jobs_done) || 0, avatar_path: v.avatar_path || '',
-              phone: q.status === 'accepted' ? (v.phone || '') : ''
-            }
-          };
+        var picked = (rows || []).filter(function (q) { return q.status === want; });
+        var ids = [], seen = {};
+        picked.forEach(function (q) {
+          var vid = String(q.vendor_id || '');
+          if (!vid || seen[vid]) return;
+          seen[vid] = true;
+          ids.push(vid);
         });
-        list.sort(function (a, b) { return (a.price - b.price) || String(a.created_at || '').localeCompare(String(b.created_at || '')); }); // thấp → cao
-        return { order: order, quotes: list };
+        return Promise.all(ids.map(function (vid) { return TTV.Store.get('vendors', vid); })).then(function (vendors) {
+          var vmap = {};
+          (vendors || []).forEach(function (v) { if (v) vmap[String(v.id)] = v; });
+          var list = picked.filter(function (q) {
+            if (want !== 'pending') return true;
+            var v = vmap[String(q.vendor_id)];
+            return v && (v.status || 'active') !== 'locked';
+          }).map(function (q) {
+            var v = vmap[String(q.vendor_id)] || {};
+            return {
+              id: String(q.id), order_id: oid, vendor_id: String(q.vendor_id), price: Number(q.price) || 0, eta_min: Number(q.eta_min) || 0,
+              message: String(q.message || ''), status: q.status, created_at: q.created_at, updated_at: q.updated_at,
+              vendor: {
+                id: String(q.vendor_id), name: v.name || '', type: v.type || 'personal', team_size: Number(v.team_size) || 1,
+                rating: Number(v.rating) || 0, jobs_done: Number(v.jobs_done) || 0, avatar_path: v.avatar_path || '',
+                phone: q.status === 'accepted' ? (v.phone || '') : ''
+              }
+            };
+          });
+          list.sort(function (a, b) { return (a.price - b.price) || String(a.created_at || '').localeCompare(String(b.created_at || '')); });
+          return { stamp: livePeek && livePeek.stamp, order: order, quotes: list };
+        });
       });
     });
   };
@@ -2555,76 +2741,98 @@ window.TTV = window.TTV || {};
     var s = customerSession();
     if (!s) return Promise.reject(fail('UNAUTH', 'Hãy đăng nhập.'));
     var oid = String(orderId), qid = String(quoteId);
-    return api.expireFindingIfNeeded(oid).then(function () { // đọc lại trạng thái ngay trước khi ghi
-      return Promise.all([TTV.Store.get('orders', oid), TTV.Store.get('quotes', qid)]);
-    }).then(function (p) {
+    return Promise.all([
+      TTV.Store.get('orders', oid, { force: true }),
+      TTV.Store.get('quotes', qid, { force: true })
+    ]).then(function (p) {
       var o = p[0], q = p[1];
       if (!o || o.user_id !== s.account_id) throw fail('NOT_FOUND', 'Không tìm thấy đơn hàng.');
       if (o.status === 'cancelled') throw fail('CONFLICT', 'Đơn đã bị hủy hoặc hết hạn nhận báo giá.');
       if (o.status !== 'finding') throw fail('CONFLICT', 'Đơn đã được ghép thợ.');
+      var end = quoteDeadlineMs(o, 30 * 60000);
+      if (end && Date.now() >= end) {
+        return cancelFindingRow(o, {
+          reason: 'Không tìm được thợ', actor_type: 'system', actor_id: 'system', notify: true
+        }).then(function () { throw fail('CONFLICT', 'Đơn đã bị hủy hoặc hết hạn nhận báo giá.'); });
+      }
       if (!q || String(q.order_id) !== oid) throw fail('QUOTE_NOT_FOUND', 'Không tìm thấy báo giá này.');
       if (q.status !== 'pending') throw fail('QUOTE_GONE', 'Thợ vừa rút hoặc sửa báo giá. Hãy xem lại danh sách.');
-      return TTV.Store.get('vendors', q.vendor_id).then(function (v) {
+      return Promise.all([
+        TTV.Store.get('vendors', q.vendor_id),
+        TTV.Store.query('orders', function (row) {
+          return String(row.vendor_id) === String(q.vendor_id) && LIVE_JOB[row.status];
+        }, { delta: true })
+      ]).then(function (extra) {
+        var v = extra[0], jobs = extra[1] || [];
         if (!v || (v.status || 'active') === 'locked') throw fail('QUOTE_GONE', 'Thợ này hiện không nhận đơn được. Hãy chọn thợ khác.');
-        return TTV.Store.query('orders', function (row) {
-          return String(row.vendor_id) === String(v.id) && LIVE_JOB[row.status];
-        }, { force: true }).then(function (jobs) {
-          if (v.type === 'personal') {
-            if (jobs && jobs.length) throw fail('QUOTE_GONE', 'Thợ này đang làm đơn khác. Hãy chọn thợ khác.');
-            return v;
-          }
+        if (v.type === 'personal' && jobs.length) throw fail('QUOTE_GONE', 'Thợ này đang làm đơn khác. Hãy chọn thợ khác.');
+        if (v.type !== 'personal') {
           var need = jobWorkers(o), left = teamFree(v, jobs, oid);
           if (need > left) {
             throw fail('QUOTE_GONE', left <= 0
               ? 'Tổ đội/công ty này đang làm hết người. Hãy chọn nhà cung cấp khác.'
               : 'Tổ đội/công ty này còn ' + left + ' thợ rảnh, đơn cần ' + need + '. Hãy chọn nhà cung cấp khác.');
           }
-          return v;
-        });
-      }).then(function (v) {
+        }
         var price = Number(q.price) || 0, now = new Date().toISOString();
         var tl = (Array.isArray(o.timeline) ? o.timeline : []).concat([{ event: 'matched', at: now }]);
-        // Đơn ví: hoàn phần chênh lệch user_offer − final_price sẽ nối ở task 7.3 (hiện đơn mới chỉ trả tiền mặt).
         var next = Object.assign({}, o, { status: 'matched', vendor_id: String(q.vendor_id), accepted_quote_id: qid, final_price: price, matched_at: now, timeline: tl });
+        var accepted = Object.assign({}, q, { status: 'accepted', updated_at: now });
         var ev = { id: TTV.Utils.id(), order_id: oid, event: 'matched', actor_type: 'customer', actor_id: s.account_id, note: 'Chọn ' + (v.name || q.vendor_id) + ' · ' + price, created_at: now };
         return TTV.Store.put('orders', next).then(function () {
-          return TTV.Store.put('quotes', Object.assign({}, q, { status: 'accepted', updated_at: now }));
+          return TTV.Store.put('quotes', accepted);
         }).then(function () {
-          return closePendingQuotes(oid, 'rejected', now, qid);
-        }).then(function (rejected) {
-          return TTV.Store.put('order_events', ev).then(function () { return rejected; });
-        }).then(function (rejected) {
-          pingLive('orders');
           var code = TTV.Utils.orderCode(oid);
           var who = v.name || 'thợ';
           background(
-            api.pushNotification({
-              event: 'quote.accepted', category: 'order',
-              title: 'Khách đã chọn bạn — đơn ' + code,
-              body: 'Mở chi tiết đơn để gọi khách và bắt đầu đến.',
-              order_id: oid, recipient_type: 'vendor', recipient_id: String(q.vendor_id)
-            }).then(function () {
-              return rejected.reduce(function (chain, r) {
-                return chain.then(function () {
-                  return api.pushNotification({
-                    event: 'quote.rejected', category: 'order',
-                    title: 'Đơn ' + code + ' đã được ghép với thợ khác',
-                    body: 'Khách đã chọn thợ khác. Bạn không xem được thông tin khách của đơn này.',
-                    order_id: oid, recipient_type: 'vendor', recipient_id: String(r.vendor_id),
-                    href: '/vendor/market'
-                  });
-                });
-              }, Promise.resolve());
-            }).then(function () {
+            TTV.Store.put('order_events', ev).then(function () {
+              return closePendingQuotes(oid, 'rejected', now, qid);
+            }).then(function (rejected) {
+              return releaseUnavailableQuotes(v, next).catch(function () { return null; }).then(function () { return rejected || []; });
+            }).then(function (rejected) {
+              return Promise.resolve(pingLive('orders', true)).then(function () { return rejected; });
+            }).then(function (rejected) {
               return api.pushNotification({
-                event: 'order.matched', category: 'order',
-                title: 'Đã ghép thợ thành công',
-                body: 'Đơn ' + code + ' đã ghép với ' + who + '. Bạn trả ' + TTV.Utils.money(price) + '. Theo dõi đơn để biết khi thợ đang đến.',
-                order_id: oid, recipient_type: 'customer', recipient_id: String(o.user_id)
+                event: 'quote.accepted', category: 'order',
+                title: 'Khách đã chọn bạn — đơn ' + code,
+                body: 'Mở chi tiết đơn để gọi khách và bắt đầu đến.',
+                order_id: oid, recipient_type: 'vendor', recipient_id: String(q.vendor_id)
+              }).then(function () {
+                return (rejected || []).reduce(function (chain, r) {
+                  return chain.then(function () {
+                    return api.pushNotification({
+                      event: 'quote.rejected', category: 'order',
+                      title: 'Đơn ' + code + ' đã được ghép với thợ khác',
+                      body: 'Khách đã chọn thợ khác. Bạn không xem được thông tin khách của đơn này.',
+                      order_id: oid, recipient_type: 'vendor', recipient_id: String(r.vendor_id),
+                      href: '/vendor/market'
+                    });
+                  });
+                }, Promise.resolve());
+              }).then(function () {
+                return api.pushNotification({
+                  event: 'order.matched', category: 'order',
+                  title: 'Đã ghép thợ thành công',
+                  body: 'Đơn ' + code + ' đã ghép với ' + who + '. Bạn trả ' + TTV.Utils.money(price) + '. Theo dõi đơn để biết khi thợ đang đến.',
+                  order_id: oid, recipient_type: 'customer', recipient_id: String(o.user_id)
+                });
               });
             })
           );
-          return { order: next, quote_id: qid };
+          return {
+            order: next,
+            quote_id: qid,
+            quotes: [{
+              id: String(qid),
+              order_id: oid,
+              vendor_id: String(q.vendor_id),
+              price: price,
+              eta_min: Number(q.eta_min) || 0,
+              message: String(q.message || ''),
+              status: 'accepted',
+              vendor: customerVendorView(v, true)
+            }]
+          };
         });
       });
     });
@@ -2671,6 +2879,15 @@ window.TTV = window.TTV || {};
   };
 
   /* ===== 7.4 Mã giảm giá (khách) ===== */
+  function couponServiceCodes(c) {
+    var raw = c && c.services, out = [];
+    if (!Array.isArray(raw)) return out;
+    raw.forEach(function (x) {
+      var k = String(x || '').trim();
+      if (k && out.indexOf(k) < 0) out.push(k);
+    });
+    return out;
+  }
   function publicCoupon(c, extra) {
     var out = {
       code: String(c.code || c.id || ''),
@@ -2681,7 +2898,9 @@ window.TTV = window.TTV || {};
       discount_value: Number(c.discount_value) || 0,
       max_discount: Number(c.max_discount) || 0,
       min_order: Number(c.min_order) || 0,
-      expires_at: c.expires_at || ''
+      expires_at: c.expires_at || '',
+      image_path: String(c.image_path || ''),
+      services: couponServiceCodes(c)
     };
     if (extra) Object.keys(extra).forEach(function (k) { out[k] = extra[k]; });
     return out;
@@ -2710,6 +2929,7 @@ window.TTV = window.TTV || {};
         if (!c || seen[code]) return;
         seen[code] = true;
         if (uc.status === 'used') out.used.push(publicCoupon(c, { used_order_id: uc.used_order_id || '' }));
+        else if (c.status === 'disabled') return; // admin tắt: ẩn khỏi ví khách (chưa dùng)
         else if (uc.status === 'expired' || couponExpired(c, now)) out.expired.push(publicCoupon(c));
         else out.available.push(publicCoupon(c));
       });
@@ -2731,6 +2951,7 @@ window.TTV = window.TTV || {};
     if (!code) return Promise.reject(fail('COUPON_EMPTY', 'Hãy nhập mã giảm giá.'));
     return TTV.Store.get('coupons', code).then(function (c) {
       if (!c) throw fail('COUPON_NOT_FOUND', 'Mã giảm giá không tồn tại.');
+      if (c.status === 'disabled') throw fail('COUPON_DISABLED', 'Mã giảm giá đã bị tắt.');
       if (couponExpired(c)) throw fail('COUPON_EXPIRED', 'Mã giảm giá đã hết hạn.');
       var id = userCouponId(uid, code);
       return TTV.Store.get('user_coupons', id).then(function (uc) {
@@ -2743,10 +2964,10 @@ window.TTV = window.TTV || {};
   };
 
   // Kiểm tra mã dùng được cho đơn (số tiền, số thợ). Quy tắc nằm trong pricing.js; đơn 1 thợ bị từ chối kèm lý do.
-  api.checkCoupon = function (rawCode, amount, workers) {
+  api.checkCoupon = function (rawCode, amount, workers, service) {
     var code = normalizeCouponCode(rawCode);
     return Promise.all([TTV.pricing.ready(), TTV.Store.get('coupons', code)]).then(function (res) {
-      var r = TTV.pricing.applyCoupon(amount, res[1], workers);
+      var r = TTV.pricing.applyCoupon(amount, res[1], workers, null, service);
       if (res[1]) r.coupon = publicCoupon(res[1]);
       return r;
     });
@@ -2782,9 +3003,9 @@ window.TTV = window.TTV || {};
   }
   function auditGroupOf(action) {
     var g = String(action || '').split('.')[0];
-    return g === 'auth' || g === 'vendor' || g === 'settings' || g === 'customer' ? g : 'other';
+    return g === 'auth' || g === 'vendor' || g === 'settings' || g === 'customer' || g === 'promo' ? g : 'other';
   }
-  api.AUDIT_GROUPS = ['auth', 'vendor', 'customer', 'settings'];
+  api.AUDIT_GROUPS = ['auth', 'vendor', 'customer', 'settings', 'promo'];
   // Trả mọi dòng nhật ký, mới nhất trước. Kèm actor_name (tra bảng staff/vendors), group, detail đã parse + loại khóa nhạy cảm.
   api.listAuditLogs = function () {
     var err = adminGuard('Bạn không có quyền xem nhật ký hoạt động.');
@@ -3075,6 +3296,528 @@ window.TTV = window.TTV || {};
           return a.kind === b.kind ? 0 : (a.kind === 'image' ? -1 : 1);
         });
         return { order: order, customer: customer, vendor: vendor, quotes: quotes, events: events, timeline: timeline, media: media };
+      });
+    });
+  };
+
+  /* ===== 8.5 Khuyến mãi (admin): mã giảm giá + banner ===== */
+  var COUPON_CODE_RE = /^[A-Z0-9]{4,20}$/;
+  var BANNER_TYPES = ['promo', 'member', 'explore'];
+  var BANNER_TARGETS = ['coupon', 'none'];
+  api.BANNER_TYPES = BANNER_TYPES;
+  api.BANNER_TARGETS = BANNER_TARGETS;
+
+  function couponLife(c, now) {
+    if (!c) return 'expired';
+    if (couponExpired(c, now)) return 'expired';
+    if (c.status === 'disabled') return 'disabled';
+    return 'active';
+  }
+  function isoEndOfDay(dateStr) {
+    return isoCouponExpiry(dateStr, '23:59');
+  }
+  function isoCouponExpiry(dateStr, timeStr) {
+    var day = String(dateStr || '').trim();
+    var tm = String(timeStr || '').trim();
+    if (/^\d{4}-\d{2}-\d{2}T/.test(day) && !tm) {
+      var iso = new Date(day);
+      return Number.isFinite(iso.getTime()) ? iso.toISOString() : '';
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return '';
+    if (!/^\d{1,2}:\d{2}$/.test(tm)) tm = '23:59';
+    var parts = tm.split(':');
+    var hh = Math.max(0, Math.min(23, parseInt(parts[0], 10)));
+    var mm = Math.max(0, Math.min(59, parseInt(parts[1], 10)));
+    var h = (hh < 10 ? '0' : '') + hh, m = (mm < 10 ? '0' : '') + mm;
+    var local = new Date(day + 'T' + h + ':' + m + ':00');
+    return Number.isFinite(local.getTime()) ? local.toISOString() : '';
+  }
+  function autoCouponCondition(minOrder) {
+    var n = Math.max(0, Math.round(Number(minOrder) || 0));
+    return n > 0 ? ('Đơn tối thiểu ' + fmtVnd(n) + 'đ') : 'Không yêu cầu đơn tối thiểu';
+  }
+  function publicAdminCoupon(c, extra) {
+    extra = extra || {};
+    var life = couponLife(c);
+    return {
+      id: String(c.id || c.code || ''),
+      code: String(c.code || c.id || ''),
+      title: String(c.title || ''),
+      condition: String(c.condition || ''),
+      min_workers: Math.max(1, Math.round(Number(c.min_workers) || 2)),
+      discount_type: c.discount_type === 'fixed' ? 'fixed' : 'percent',
+      discount_value: Number(c.discount_value) || 0,
+      max_discount: Number(c.max_discount) || 0,
+      min_order: Number(c.min_order) || 0,
+      expires_at: c.expires_at || '',
+      image_path: String(c.image_path || ''),
+      services: couponServiceCodes(c),
+      status: c.status === 'disabled' ? 'disabled' : (life === 'expired' ? 'expired' : 'active'),
+      life: life,
+      grants: extra.grants || 0,
+      used: extra.used || 0,
+      created_at: c.created_at || ''
+    };
+  }
+  function publicAdminBanner(b) {
+    if (!b) return null;
+    return {
+      id: String(b.id),
+      title: String(b.title || ''),
+      subtitle: String(b.subtitle || ''),
+      image_path: String(b.image_path || ''),
+      type: BANNER_TYPES.indexOf(b.type) >= 0 ? b.type : 'promo',
+      target: BANNER_TARGETS.indexOf(b.target) >= 0 ? b.target : 'none',
+      sort: Math.max(0, Math.round(Number(b.sort) || 0)),
+      active: b.active !== false,
+      created_at: b.created_at || ''
+    };
+  }
+  api.generateCouponCode = function () {
+    var chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789', s = 'TTV', i;
+    for (i = 0; i < 5; i++) s += chars.charAt(Math.floor(Math.random() * chars.length));
+    return s;
+  };
+  api.validateCouponInput = function (input, opts) {
+    opts = opts || {};
+    var errors = {}, v = {};
+    var code = normalizeCouponCode(input && input.code);
+    if (!opts.editing) {
+      if (!code) errors.code = 'Vui lòng nhập mã.';
+      else if (!COUPON_CODE_RE.test(code)) errors.code = 'Mã 4–20 ký tự, chỉ chữ in hoa và số.';
+      else v.code = code;
+    }
+    var title = String((input && input.title) || '').trim().replace(/\s+/g, ' ');
+    if (title.length < 2 || title.length > 80) errors.title = 'Tiêu đề 2–80 ký tự.';
+    else v.title = title;
+    var cond = String((input && input.condition) || '').trim().replace(/\s+/g, ' ');
+    if (cond.length > 200) errors.condition = 'Điều kiện tối đa 200 ký tự.';
+    else v.condition = cond;
+    var mw = Math.round(Number(input && input.min_workers));
+    if (!Number.isFinite(mw) || mw < 1 || mw > 10) errors.min_workers = 'Số thợ từ 1 đến 10.';
+    else v.min_workers = mw;
+    var dtype = (input && input.discount_type) === 'fixed' ? 'fixed' : 'percent';
+    v.discount_type = dtype;
+    if (dtype === 'percent') {
+      var pct = parseDecimalInput(input && input.discount_value);
+      if (pct == null || pct < 1 || pct > 100) errors.discount_value = 'Phần trăm giảm từ 1 đến 100.';
+      else v.discount_value = pct;
+      var capRaw = String((input && input.max_discount) || '').trim();
+      if (!capRaw) v.max_discount = 0;
+      else {
+        var cap = api.parseMoneyInput(capRaw);
+        if (cap == null || cap < 0 || cap > 10000000) errors.max_discount = 'Trần giảm từ 0đ đến 10.000.000đ (để trống = không trần).';
+        else v.max_discount = cap;
+      }
+    } else {
+      var amt = api.parseMoneyInput(input && input.discount_value);
+      if (amt == null || amt < 1000 || amt > 10000000) errors.discount_value = 'Số tiền giảm từ 1.000đ đến 10.000.000đ.';
+      else v.discount_value = amt;
+      v.max_discount = 0;
+    }
+    var minRaw = String((input && input.min_order) || '').trim();
+    if (!minRaw) v.min_order = 0;
+    else {
+      var minO = api.parseMoneyInput(minRaw);
+      if (minO == null || minO < 0 || minO > 50000000) errors.min_order = 'Đơn tối thiểu từ 0đ đến 50.000.000đ.';
+      else v.min_order = minO;
+    }
+    var exp = isoCouponExpiry(input && input.expires_at, input && input.expires_time);
+    if (!exp) errors.expires_at = 'Vui lòng chọn ngày và giờ hết hạn.';
+    else v.expires_at = exp;
+    var img = String((input && input.image_path) || '').trim();
+    if (img) {
+      if (!/^uploads\//.test(img) || !/\.(jpe?g|png|gif|webp|heic|bmp)$/i.test(img)) errors.image_path = 'Ảnh không hợp lệ.';
+      else v.image_path = img;
+    } else v.image_path = '';
+    var allowed = Array.isArray(opts.serviceCodes) ? opts.serviceCodes.map(String).filter(Boolean) : [];
+    var picked = couponServiceCodes({ services: input && input.services }).filter(function (k) {
+      return !allowed.length || allowed.indexOf(k) >= 0;
+    });
+    if (!picked.length) errors.services = 'Chọn tất cả hoặc ít nhất một dịch vụ.';
+    else if (allowed.length && picked.length >= allowed.length) v.services = [];
+    else v.services = picked;
+    if (!v.condition && v.min_order != null && !errors.min_order) v.condition = autoCouponCondition(v.min_order);
+    return { errors: errors, value: v };
+  };
+
+  api.listAdminCoupons = function () {
+    var err = adminGuard('Bạn không có quyền xem mã giảm giá.');
+    if (err) return Promise.reject(err);
+    if (TTV.Store.invalidate) { try { TTV.Store.invalidate(['coupons', 'user_coupons']); } catch (_) {} }
+    return Promise.all([TTV.Store.list('coupons'), TTV.Store.list('user_coupons')]).then(function (r) {
+      var grants = {}, used = {};
+      (r[1] || []).forEach(function (uc) {
+        var k = String(uc.coupon_code || '');
+        grants[k] = (grants[k] || 0) + 1;
+        if (uc.status === 'used') used[k] = (used[k] || 0) + 1;
+      });
+      return (r[0] || []).map(function (c) {
+        var code = String(c.code || c.id);
+        return publicAdminCoupon(c, { grants: grants[code] || 0, used: used[code] || 0 });
+      }).sort(function (a, b) {
+        if (a.created_at !== b.created_at) return String(b.created_at).localeCompare(String(a.created_at));
+        return a.code.localeCompare(b.code);
+      });
+    });
+  };
+
+  api.getAdminCoupon = function (code) {
+    var err = adminGuard('Bạn không có quyền xem mã giảm giá.');
+    if (err) return Promise.reject(err);
+    code = normalizeCouponCode(code);
+    if (TTV.Store.invalidate) { try { TTV.Store.invalidate(['coupons', 'user_coupons']); } catch (_) {} }
+    return Promise.all([
+      TTV.Store.get('coupons', code),
+      TTV.Store.query('user_coupons', function (r) { return String(r.coupon_code) === code; }),
+      TTV.Store.list('users')
+    ]).then(function (r) {
+      if (!r[0]) return null;
+      var names = {}, phones = {};
+      (r[2] || []).forEach(function (u) {
+        var id = String(u.id);
+        names[id] = u.name || u.phone || '';
+        phones[id] = u.phone || '';
+      });
+      var grants = (r[1] || []).map(function (uc) {
+        var uid = String(uc.user_id);
+        return {
+          id: String(uc.id), user_id: uid, customer_name: names[uid] || '',
+          customer_phone: phones[uid] || '',
+          status: uc.status || 'available', used_order_id: uc.used_order_id || '', created_at: uc.created_at || ''
+        };
+      }).sort(function (a, b) { return String(b.created_at).localeCompare(String(a.created_at)); });
+      var used = grants.filter(function (g) { return g.status === 'used'; }).length;
+      var have = {};
+      grants.forEach(function (g) { have[g.user_id] = g.status; });
+      var targets = (r[2] || []).map(function (u) {
+        var row = publicCustomer(u);
+        if (!row) return null;
+        row.coupon_status = have[row.id] || '';
+        return row;
+      }).filter(Boolean).sort(function (a, b) {
+        return String(a.name || '').localeCompare(String(b.name || ''), 'vi');
+      });
+      return { coupon: publicAdminCoupon(r[0], { grants: grants.length, used: used }), grants: grants, targets: targets };
+    });
+  };
+
+  api.saveAdminCoupon = function (input) {
+    var err = adminGuard('Bạn không có quyền lưu mã giảm giá.');
+    if (err) return Promise.reject(err);
+    input = input || {};
+    var editing = !!input.id || !!input.editing;
+    return api.listServices().then(function (svcs) {
+      var serviceCodes = (svcs || []).map(function (s) { return String(s.code || s.id || ''); }).filter(Boolean);
+      var parsed = api.validateCouponInput(input, { editing: editing, serviceCodes: serviceCodes });
+      if (Object.keys(parsed.errors).length) return Promise.reject(fail('VALIDATION', 'Dữ liệu chưa hợp lệ.', { errors: parsed.errors }));
+      var v = parsed.value;
+      var key = editing ? normalizeCouponCode(input.id || input.code) : v.code;
+      function write(cur) {
+        var row = Object.assign({}, cur || {}, {
+          id: key, code: key, title: v.title, condition: v.condition, min_workers: v.min_workers,
+          discount_type: v.discount_type, discount_value: v.discount_value, max_discount: v.max_discount,
+          min_order: v.min_order, expires_at: v.expires_at,
+          image_path: v.image_path, services: v.services
+        });
+        if (!cur) {
+          row.status = 'active';
+          row.created_at = new Date().toISOString();
+        } else if (couponLife(cur) !== 'expired' && cur.status !== 'disabled') {
+          row.status = 'active';
+        }
+        return TTV.Store.put('coupons', row).then(function (saved) {
+          var action = cur ? 'promo.coupon.update' : 'promo.coupon.create';
+          var detail = cur ? { fields: Object.keys(v), code: key } : { code: key, title: v.title, discount_type: v.discount_type, discount_value: v.discount_value };
+          return auditSafe(action, { target_table: 'coupons', target_id: key, detail: detail }).then(function () {
+            return publicAdminCoupon(saved);
+          });
+        });
+      }
+      function normSvc(arr) {
+        var list = couponServiceCodes({ services: arr }).filter(function (k) {
+          return !serviceCodes.length || serviceCodes.indexOf(k) >= 0;
+        });
+        if (!list.length || (serviceCodes.length && list.length >= serviceCodes.length)) return '';
+        return list.slice().sort().join('|');
+      }
+      return TTV.Store.get('coupons', key).then(function (cur) {
+        if (!editing && cur) return Promise.reject(fail('VALIDATION', 'Mã này đã tồn tại.', { errors: { code: 'Mã này đã tồn tại.' } }));
+        if (editing && !cur) return Promise.reject(fail('NOT_FOUND', 'Không tìm thấy mã giảm giá.'));
+        return TTV.Store.get('coupons', key).then(function (again) { // đọc lại ngay trước khi ghi
+          if (!editing && again) return Promise.reject(fail('VALIDATION', 'Mã này đã tồn tại.', { errors: { code: 'Mã này đã tồn tại.' } }));
+          if (editing && !again) return Promise.reject(fail('NOT_FOUND', 'Không tìm thấy mã giảm giá.'));
+          if (editing) {
+            var same = again.title === v.title && again.condition === v.condition && Number(again.min_workers) === v.min_workers &&
+              (again.discount_type === 'fixed' ? 'fixed' : 'percent') === v.discount_type && Number(again.discount_value) === v.discount_value &&
+              Number(again.max_discount || 0) === v.max_discount && Number(again.min_order || 0) === v.min_order &&
+              String(again.expires_at || '') === v.expires_at &&
+              String(again.image_path || '') === String(v.image_path || '') &&
+              normSvc(again.services) === normSvc(v.services);
+            if (same) return Promise.reject(fail('NO_CHANGE', 'Không có thay đổi.'));
+          }
+          return write(again);
+        });
+      });
+    });
+  };
+
+  api.setCouponStatus = function (code, status) {
+    var err = adminGuard('Bạn không có quyền tắt hoặc bật mã giảm giá.');
+    if (err) return Promise.reject(err);
+    code = normalizeCouponCode(code);
+    if (status !== 'active' && status !== 'disabled') return Promise.reject(fail('VALIDATION', 'Trạng thái không hợp lệ.'));
+    return TTV.Store.get('coupons', code).then(function (c) {
+      if (!c) throw fail('NOT_FOUND', 'Không tìm thấy mã giảm giá.');
+      var cur = c.status === 'disabled' ? 'disabled' : 'active';
+      if (cur === status) return publicAdminCoupon(c);
+      var next = Object.assign({}, c, { status: status, updated_at: new Date().toISOString() });
+      return TTV.Store.put('coupons', next).then(function (saved) {
+        return auditSafe(status === 'disabled' ? 'promo.coupon.disable' : 'promo.coupon.enable', {
+          target_table: 'coupons', target_id: code, detail: { code: code }
+        }).then(function () { return publicAdminCoupon(saved); });
+      });
+    });
+  };
+
+  api.deleteAdminCoupon = function (code) {
+    var err = adminGuard('Bạn không có quyền xóa mã giảm giá.');
+    if (err) return Promise.reject(err);
+    code = normalizeCouponCode(code);
+    return Promise.all([
+      TTV.Store.get('coupons', code),
+      TTV.Store.query('user_coupons', function (r) { return String(r.coupon_code) === code; })
+    ]).then(function (r) {
+      if (!r[0]) throw fail('NOT_FOUND', 'Không tìm thấy mã giảm giá.');
+      var used = (r[1] || []).filter(function (uc) { return uc.status === 'used'; });
+      if (used.length) throw fail('IN_USE', 'Không xóa được vì đã có khách dùng mã. Hãy tắt mã.');
+      var unused = (r[1] || []).filter(function (uc) { return uc.status !== 'used'; });
+      var chain = Promise.resolve();
+      unused.forEach(function (uc) {
+        chain = chain.then(function () { return TTV.Store.remove('user_coupons', uc.id); });
+      });
+      return chain.then(function () { return TTV.Store.remove('coupons', code); }).then(function () {
+        return auditSafe('promo.coupon.delete', { target_table: 'coupons', target_id: code, detail: { code: code, title: r[0].title || '' } });
+      });
+    });
+  };
+
+  // Danh sách khách để cấp mã: không đọc đơn (tránh chậm KIO). coupon_status = available|used|''.
+  api.listCouponGrantTargets = function (code) {
+    var err = adminGuard('Bạn không có quyền xem khách để cấp mã.');
+    if (err) return Promise.reject(err);
+    code = normalizeCouponCode(code);
+    return TTV.Store.list('users').then(function (users) {
+      var base = (users || []).map(function (u) {
+        var row = publicCustomer(u);
+        if (row) row.coupon_status = '';
+        return row;
+      }).filter(Boolean);
+      return TTV.Store.query('user_coupons', function (r) { return String(r.coupon_code) === code; }).then(function (ucs) {
+        var have = {};
+        (ucs || []).forEach(function (uc) { have[String(uc.user_id)] = uc.status || 'available'; });
+        base.forEach(function (c) { c.coupon_status = have[c.id] || ''; });
+        return base.sort(function (a, b) {
+          return String(a.name || '').localeCompare(String(b.name || ''), 'vi');
+        });
+      }).catch(function () { return base; });
+    });
+  };
+
+  // Cấp mã cho một / nhiều / tất cả khách đang hoạt động. Bỏ qua đã có, đã dùng, đã khóa.
+  // Ghi user_coupons trước (để chi tiết mã thấy khách đã cấp). Thông báo không chặn lưu.
+  api.grantCouponToCustomers = function (code, opts) {
+    var err = adminGuard('Bạn không có quyền cấp mã giảm giá.');
+    if (err) return Promise.reject(err);
+    opts = opts || {};
+    code = normalizeCouponCode(code);
+    var wantAll = !!opts.all;
+    var wantIds = {};
+    (Array.isArray(opts.user_ids) ? opts.user_ids : []).forEach(function (id) {
+      if (id) wantIds[String(id)] = true;
+    });
+    if (opts.user_id) wantIds[String(opts.user_id)] = true;
+    if (!wantAll && !Object.keys(wantIds).length) {
+      return Promise.reject(fail('VALIDATION', 'Chọn khách hàng.', { errors: { user_id: 'Chọn khách hàng.' } }));
+    }
+    var usersP = wantAll
+      ? TTV.Store.list('users')
+      : Promise.all(Object.keys(wantIds).map(function (id) { return TTV.Store.get('users', id); }))
+        .then(function (rows) { return rows.filter(Boolean); });
+    return Promise.all([
+      TTV.Store.get('coupons', code),
+      usersP,
+      TTV.Store.query('user_coupons', function (r) { return String(r.coupon_code) === code; })
+    ]).then(function (r) {
+      var c = r[0];
+      if (!c) throw fail('NOT_FOUND', 'Không tìm thấy mã giảm giá.');
+      if (c.status === 'disabled') throw fail('COUPON_DISABLED', 'Mã đang tắt, không cấp được.');
+      if (couponExpired(c)) throw fail('COUPON_EXPIRED', 'Mã đã hết hạn, không cấp được.');
+      var have = {};
+      (r[2] || []).forEach(function (uc) { have[String(uc.user_id)] = uc.status || 'available'; });
+      var skipped = { owned: 0, used: 0, locked: 0, missing: 0 };
+      var pick = [];
+      (r[1] || []).forEach(function (u) {
+        var id = String(u.id || '');
+        if (!id) return;
+        if (!wantAll && !wantIds[id]) return;
+        delete wantIds[id];
+        if (u.status === 'locked') { skipped.locked += 1; return; }
+        var st = have[id];
+        if (st === 'used') { skipped.used += 1; return; }
+        if (st === 'available') { skipped.owned += 1; return; }
+        pick.push(u);
+      });
+      skipped.missing = Object.keys(wantIds).length;
+      if (!pick.length) {
+        return { coupon: publicAdminCoupon(c), granted: 0, skipped: skipped };
+      }
+      var now = new Date().toISOString();
+      var stamp = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+      var ucs = [], notis = [], marks = [];
+      pick.forEach(function (u) {
+        var uid = String(u.id);
+        ucs.push({
+          id: userCouponId(uid, code), user_id: uid, coupon_code: code,
+          status: 'available', used_order_id: '', created_at: now, granted_by: 'admin'
+        });
+        notis.push({
+          id: 'cg-' + uid + '-' + code, is_read: false, recipient_type: 'customer', recipient_id: uid,
+          category: 'promo', event: 'coupon.grant', title: 'Bạn nhận được mã ' + code,
+          body: c.title || 'Mã giảm giá mới từ TingTingVac.', order_id: '', href: '/coupons',
+          dedupe_key: 'coupon.grant::customer:' + uid, created_at: now, updated_at: now
+        });
+        marks.push({ id: 'customer:' + uid, t: stamp, del: 0 });
+      });
+      var put = TTV.Store.putAll ? function (table, rows) { return TTV.Store.putAll(table, rows); }
+        : function (table, rows) {
+          return rows.reduce(function (chain, row) {
+            return chain.then(function () { return TTV.Store.put(table, row); });
+          }, Promise.resolve());
+        };
+      return put('user_coupons', ucs).then(function () {
+        return auditSafe('promo.coupon.grant', {
+          target_table: 'coupons', target_id: code,
+          detail: { code: code, count: pick.length, all: wantAll }
+        });
+      }).then(function () {
+        put('notifications', notis).then(function () { return put('noti_marks', marks); }).then(function () {
+          try { pingLive('noti'); } catch (_) {}
+        }).catch(function () {});
+        return { coupon: publicAdminCoupon(c), granted: pick.length, skipped: skipped };
+      });
+    });
+  };
+  api.grantCouponToCustomer = function (code, userId) {
+    return api.grantCouponToCustomers(code, { user_ids: [userId] }).then(function (r) {
+      if (!r.granted) {
+        if (r.skipped && r.skipped.used) throw fail('COUPON_USED', 'Khách đã dùng mã này.');
+        if (r.skipped && r.skipped.owned) throw fail('COUPON_OWNED', 'Khách đã có mã này.');
+        if (r.skipped && r.skipped.locked) throw fail('ACCOUNT_LOCKED', 'Tài khoản khách đang bị khóa.');
+        throw fail('NOT_FOUND', 'Không tìm thấy khách hàng.');
+      }
+      return r.coupon;
+    });
+  };
+
+  api.validateBannerInput = function (input) {
+    input = input || {};
+    var errors = {}, v = {};
+    var title = String(input.title || '').trim().replace(/\s+/g, ' ');
+    if (title.length < 2 || title.length > 80) errors.title = 'Tiêu đề 2–80 ký tự.';
+    else v.title = title;
+    var sub = String(input.subtitle || '').trim().replace(/\s+/g, ' ');
+    if (sub.length > 120) errors.subtitle = 'Phụ đề tối đa 120 ký tự.';
+    else v.subtitle = sub;
+    var type = String(input.type || 'promo');
+    if (BANNER_TYPES.indexOf(type) < 0) errors.type = 'Loại banner không hợp lệ.';
+    else v.type = type;
+    var target = String(input.target || 'none');
+    if (BANNER_TARGETS.indexOf(target) < 0) errors.target = 'Đích không hợp lệ.';
+    else v.target = target;
+    var sort = Math.round(Number(input.sort));
+    if (!Number.isFinite(sort) || sort < 1 || sort > 99) errors.sort = 'Thứ tự từ 1 đến 99.';
+    else v.sort = sort;
+    v.active = input.active !== false && input.active !== 'false' && input.active !== 0;
+    var path = String(input.image_path == null ? '' : input.image_path).trim();
+    if (!path) errors.image_path = 'Hãy chọn ảnh banner.';
+    else if (!/^uploads\/.+\/banners\/[^/]+\.[a-z0-9]+$/i.test(path) && !/^uploads\/img-giaodien\/[^/]+\.(png|jpe?g|webp|gif)$/i.test(path)) {
+      errors.image_path = 'Đường dẫn ảnh không hợp lệ.';
+    } else v.image_path = path;
+    return { errors: errors, value: v };
+  };
+
+  api.listAdminBanners = function () {
+    var err = adminGuard('Bạn không có quyền xem banner.');
+    if (err) return Promise.reject(err);
+    if (TTV.Store.invalidate) { try { TTV.Store.invalidate(['banners']); } catch (_) {} }
+    return TTV.Store.list('banners').then(function (rows) {
+      return (rows || []).map(publicAdminBanner).sort(function (a, b) {
+        if (a.sort !== b.sort) return a.sort - b.sort;
+        return String(a.id).localeCompare(String(b.id));
+      });
+    });
+  };
+
+  api.getAdminBanner = function (id) {
+    var err = adminGuard('Bạn không có quyền xem banner.');
+    if (err) return Promise.reject(err);
+    return TTV.Store.get('banners', String(id)).then(function (b) { return b ? publicAdminBanner(b) : null; });
+  };
+
+  api.saveAdminBanner = function (input) {
+    var err = adminGuard('Bạn không có quyền lưu banner.');
+    if (err) return Promise.reject(err);
+    input = input || {};
+    var parsed = api.validateBannerInput(input);
+    if (Object.keys(parsed.errors).length) return Promise.reject(fail('VALIDATION', 'Dữ liệu chưa hợp lệ.', { errors: parsed.errors }));
+    var v = parsed.value, id = String(input.id || '').trim() || ('banner-' + TTV.Utils.id());
+    return TTV.Store.get('banners', id).then(function (cur) {
+      if (input.id && !cur) throw fail('NOT_FOUND', 'Không tìm thấy banner.');
+      if (cur) {
+        var same = cur.title === v.title && String(cur.subtitle || '') === v.subtitle && cur.image_path === v.image_path &&
+          cur.type === v.type && cur.target === v.target && Number(cur.sort || 0) === v.sort && (cur.active !== false) === v.active;
+        if (same) throw fail('NO_CHANGE', 'Không có thay đổi.');
+      }
+      var row = Object.assign({}, cur || {}, {
+        id: id, title: v.title, subtitle: v.subtitle, image_path: v.image_path,
+        type: v.type, target: v.target, sort: v.sort, active: v.active
+      });
+      if (!cur) row.created_at = new Date().toISOString();
+      else row.updated_at = new Date().toISOString();
+      return TTV.Store.put('banners', row).then(function (saved) {
+        return auditSafe(cur ? 'promo.banner.update' : 'promo.banner.create', {
+          target_table: 'banners', target_id: id, detail: { title: v.title, type: v.type, target: v.target, sort: v.sort, active: v.active }
+        }).then(function () { return publicAdminBanner(saved); });
+      });
+    });
+  };
+
+  api.setBannerActive = function (id, active) {
+    var err = adminGuard('Bạn không có quyền ẩn hoặc hiện banner.');
+    if (err) return Promise.reject(err);
+    id = String(id);
+    active = !!active;
+    return TTV.Store.get('banners', id).then(function (b) {
+      if (!b) throw fail('NOT_FOUND', 'Không tìm thấy banner.');
+      if ((b.active !== false) === active) return publicAdminBanner(b);
+      var next = Object.assign({}, b, { active: active, updated_at: new Date().toISOString() });
+      return TTV.Store.put('banners', next).then(function (saved) {
+        return auditSafe('promo.banner.toggle', {
+          target_table: 'banners', target_id: id, detail: { title: b.title || '', active: active }
+        }).then(function () { return publicAdminBanner(saved); });
+      });
+    });
+  };
+
+  api.deleteAdminBanner = function (id) {
+    var err = adminGuard('Bạn không có quyền xóa banner.');
+    if (err) return Promise.reject(err);
+    id = String(id);
+    return TTV.Store.get('banners', id).then(function (b) {
+      if (!b) throw fail('NOT_FOUND', 'Không tìm thấy banner.');
+      return TTV.Store.remove('banners', id).then(function () {
+        return auditSafe('promo.banner.delete', { target_table: 'banners', target_id: id, detail: { title: b.title || '' } });
       });
     });
   };

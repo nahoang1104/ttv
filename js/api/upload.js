@@ -3,7 +3,7 @@ window.TTV = window.TTV || {};
 (function (TTV) {
   'use strict';
   var MAX_VIDEO_SECONDS = 120;
-  var KINDS = ['avatar', 'order-images', 'order-videos', 'banners'];
+  var KINDS = ['avatar', 'order-images', 'order-videos', 'banners', 'coupon-images'];
 
   function looksLikeVideo(file) {
     if (!file) return false;

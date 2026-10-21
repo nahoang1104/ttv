@@ -50,7 +50,7 @@ TTV.screens = TTV.screens || {};
   };
 
   function bannerImage(banner) {
-    return BANNER_IMG[banner.type] || banner.image_path || BANNER_IMG.promo;
+    return banner.image_path || BANNER_IMG[banner.type] || BANNER_IMG.promo;
   }
 
   function bannerSlide(banner) {

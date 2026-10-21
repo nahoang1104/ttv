@@ -6,19 +6,28 @@ window.TTV = window.TTV || {};
   'use strict';
   var CHANNEL = 'ttv_live';
   var POLL_MS = 4000;
+  var POLL_MAX_MS = 32000;
   var bc = null;
   var timer = null;
   var worker = null;
   var tickN = 0;
   var groups = {};
   var uid = 0;
+  var pollDelay = POLL_MS;
+  var nextTickAt = 0;
+  var isNotiLeader = true;
+  var leaderTried = false;
 
   function openBc() {
     if (bc || typeof BroadcastChannel === 'undefined') return;
     try {
       bc = new BroadcastChannel(CHANNEL);
       bc.onmessage = function (ev) {
-        if (ev && ev.data && ev.data.type === 'ping') fire(ev.data.topic || '*');
+        var data = ev && ev.data;
+        if (!data) return;
+        if (data.type === 'ping') fire(data.topic || '*');
+        else if (data.type === 'noti-sync') applyRemote(data);
+        else if (data.type === 'noti-ask' && isNotiLeader && fetched) broadcastNoti();
       };
     } catch (_) { bc = null; }
   }
@@ -44,34 +53,59 @@ window.TTV = window.TTV || {};
     if (topic === '*') Object.keys(groups).forEach(run);
     else { run(topic); if (!only) run('*'); }
   }
-  // Mỗi nhịp: tab đang hiện → làm mới mọi thứ (4s); tab bị ẩn → chỉ hỏi thông báo, 8s một lần (đơn/báo giá tự làm mới khi quay lại tab).
+  // Tab hiện: chuông 4s (chỉ mốc noti_marks). Đơn/báo giá 8s — bảng orders/quotes nặng hơn nhiều.
+  // Tab ẩn: chỉ chuông, 8s; đơn tự làm mới khi quay lại tab.
   function onTick() {
+    if (Date.now() < nextTickAt) return;
     tickN += 1;
-    if (!document.hidden) { fire('*', true); return; }
-    if (tickN % 2) return;
-    fire('noti', true, true);
+    if (document.hidden) {
+      if (isNotiLeader && tickN % 2 === 0) fire('noti', true, true);
+      return;
+    }
+    if (isNotiLeader) fire('noti', true, true);
+    if (tickN % 2 === 0) fire('orders', true, true);
+  }
+  function scheduleTick() {
+    if (timer) { clearTimeout(timer); timer = null; }
+    timer = setTimeout(function () {
+      timer = null;
+      onTick();
+      if (hasSubs()) scheduleTick();
+    }, pollDelay);
   }
   function startTimer() {
     if ((timer || worker) || !hasSubs()) return;
-    // Timer trong Web Worker không bị Chrome/Edge giãn nhịp (tới 1 phút/lần) khi tab nền như timer của trang.
     try {
-      var url = URL.createObjectURL(new Blob(['setInterval(function(){postMessage(0)},' + POLL_MS + ')'], { type: 'text/javascript' }));
+      var url = URL.createObjectURL(new Blob(['function loop(){postMessage(0);setTimeout(loop,' + POLL_MS + ')}loop()'], { type: 'text/javascript' }));
       worker = new Worker(url);
       worker.onmessage = onTick;
       worker.onerror = function () {
         if (worker) { try { worker.terminate(); } catch (_) {} worker = null; }
-        if (!timer && hasSubs()) timer = setInterval(onTick, POLL_MS);
+        if (hasSubs()) scheduleTick();
       };
       setTimeout(function () { URL.revokeObjectURL(url); }, 0);
     } catch (_) {
       worker = null;
-      timer = setInterval(onTick, POLL_MS);
+      scheduleTick();
     }
   }
   function stopTimerIfEmpty() {
     if (hasSubs()) return;
     if (worker) { try { worker.terminate(); } catch (_) {} worker = null; }
-    if (timer) { clearInterval(timer); timer = null; }
+    if (timer) { clearTimeout(timer); timer = null; }
+  }
+  function claimNotiLeader() {
+    if (leaderTried) return;
+    leaderTried = true;
+    if (typeof navigator === 'undefined' || !navigator.locks || typeof navigator.locks.request !== 'function') {
+      isNotiLeader = true;
+      return;
+    }
+    isNotiLeader = false;
+    navigator.locks.request('ttv-noti-leader', function () {
+      isNotiLeader = true;
+      return new Promise(function () {});
+    }).catch(function () { isNotiLeader = true; });
   }
 
   TTV.Live = {
@@ -89,6 +123,7 @@ window.TTV = window.TTV || {};
       var w = { id: ++uid, cb: cb };
       if (!groups[topic]) groups[topic] = [];
       groups[topic].push(w);
+      claimNotiLeader();
       startTimer();
       if (!opts || opts.immediate !== false) {
         try { cb(); } catch (_) {}
@@ -101,15 +136,20 @@ window.TTV = window.TTV || {};
   };
   document.addEventListener('visibilitychange', function () {
     paintTitle(lastUnread < 0 ? 0 : lastUnread);
-    if (!document.hidden) fire('*');
+    if (!document.hidden) {
+      nextTickAt = 0;
+      pollDelay = POLL_MS;
+      fire('*');
+    }
   });
 
   var lastKey = '';
   var lastUnread = -1;
   var lastSig = '';
-  var lastStamp = null;       // mốc hộp thư lần tải đầy đủ gần nhất
-  var lastFullAt = 0;         // giờ tải đầy đủ gần nhất
-  var SAFETY_MS = 60000;      // dù mốc không đổi, vẫn tải đầy đủ mỗi 60 giây phòng ghi mốc hỏng
+  var lastStamp = null;
+  var lastDel = 0;
+  var lastFullAt = 0;
+  var nextSafetyAt = 0;
   var lastUnreadIds = {};
   var cached = [];
   var fetched = false;
@@ -206,39 +246,68 @@ window.TTV = window.TTV || {};
       return r.id + ':' + (r.is_read ? '1' : '0') + ':' + String(r.created_at || '');
     }).join('|');
   }
-  // Hỏi "có gì mới không": đọc mốc nhỏ của riêng mình. full=true khi cần tải danh sách.
+  function inboxStale() {
+    if (!fetched || lastFullAt <= 0) return false;
+    if (!nextSafetyAt) nextSafetyAt = lastFullAt + 15 * 60 * 1000 + Math.floor(Math.random() * 15 * 60 * 1000);
+    return Date.now() >= nextSafetyAt;
+  }
+  function parseStamp(raw) {
+    if (!raw || typeof raw === 'string') return { t: String(raw || ''), del: 0 };
+    return { t: String(raw.t || ''), del: Number(raw.del) || 0 };
+  }
   function checkStamp() {
-    var stale = function () { return Date.now() - lastFullAt >= SAFETY_MS; };
-    if (!TTV.api || typeof TTV.api.getNotiStamp !== 'function') return Promise.resolve({ full: true, stamp: null });
-    return TTV.api.getNotiStamp().then(function (stamp) {
-      return { full: stamp !== lastStamp || stale(), stamp: stamp };
-    }).catch(function () { return { full: stale(), stamp: lastStamp }; });
+    if (!TTV.api || typeof TTV.api.getNotiStamp !== 'function') return Promise.resolve({ load: true, needFull: true, stamp: '', del: 0 });
+    return TTV.api.getNotiStamp().then(function (raw) {
+      var rec = parseStamp(raw);
+      var delChanged = rec.del !== lastDel;
+      return { load: rec.t !== lastStamp || delChanged || inboxStale(), needFull: delChanged, stamp: rec.t, del: rec.del };
+    }).catch(function () {
+      return { load: false, needFull: false, stamp: lastStamp, del: lastDel };
+    });
   }
   function refresh(fromPoll) {
     if (!sessionKey()) return Promise.resolve();
     if (!badgeCbs.length && !listCbs.length && !soundReady) return Promise.resolve();
+    if (fromPoll && !isNotiLeader) return Promise.resolve();
     if (busy) { queued = true; return Promise.resolve(); }
     if (!TTV.api || typeof TTV.api.listMyNotifications !== 'function') return Promise.resolve();
     busy = true;
-    var ping = !fromPoll;
+    var switched = sessionKey() !== lastKey;
     return checkStamp().then(function (c) {
-      // Ping / lần đầu / đổi tài khoản: luôn tải đầy đủ. Poll: chỉ tải khi mốc đổi.
-      if (ping || !fetched || sessionKey() !== lastKey) c.full = true;
-      if (!c.full) return null;
-      return TTV.api.listMyNotifications(ping ? { force: true } : undefined).then(function (rows) {
-        lastStamp = c.stamp; lastFullAt = Date.now();
+      if (!(!fetched || switched || c.load)) return null;
+      var doFull = !fetched || inboxStale() || switched || c.needFull;
+      return TTV.api.listMyNotifications({ full: doFull }).then(function (rows) {
+        lastStamp = c.stamp;
+        lastDel = c.del;
+        lastFullAt = Date.now();
+        if (doFull) nextSafetyAt = Date.now() + 15 * 60 * 1000 + Math.floor(Math.random() * 15 * 60 * 1000);
         return rows || [];
       });
     }).then(function (rows) {
       busy = false;
+      pollDelay = POLL_MS;
       if (rows) apply(rows);
       if (queued) { queued = false; return refresh(fromPoll); }
     }).catch(function () {
       busy = false;
+      pollDelay = Math.min(Math.max(pollDelay, POLL_MS) * 2, POLL_MAX_MS);
+      nextTickAt = Date.now() + pollDelay;
       if (queued) { queued = false; return refresh(fromPoll); }
     });
   }
-  function apply(rows) {
+  function broadcastNoti() {
+    if (!bc || !isNotiLeader) return;
+    try {
+      bc.postMessage({ type: 'noti-sync', key: sessionKey(), stamp: lastStamp, del: lastDel, rows: cached });
+    } catch (_) {}
+  }
+  function applyRemote(data) {
+    if (!data || data.key !== sessionKey() || !Array.isArray(data.rows)) return;
+    lastStamp = data.stamp;
+    lastDel = Number(data.del) || 0;
+    apply(data.rows, true);
+  }
+  function apply(rows, fromBc) {
     var key = sessionKey();
     if (Date.now() < holdUntil) {
       rows.forEach(function (r) { if (heldRead[r.id]) r.is_read = true; });
@@ -257,7 +326,7 @@ window.TTV = window.TTV || {};
     lastUnread = unread;
     lastSig = sig;
     lastUnreadIds = unreadIds;
-    if (arrived) {
+    if (arrived && !fromBc) {
       playNotiSound();
       systemNotify(arrivedRows);
       arrivedRows.forEach(function (r) {
@@ -274,11 +343,16 @@ window.TTV = window.TTV || {};
       badgeCbs.slice().forEach(function (cb) { try { cb(unread); } catch (_) {} });
       listCbs.slice().forEach(function (cb) { try { cb(rows); } catch (_) {} });
     }
+    if (isNotiLeader && !fromBc) broadcastNoti();
   }
   function addWatch(list, cb, kind) {
     if (typeof cb !== 'function') return function () {};
     list.push(cb);
-    if (!stopNoti) stopNoti = TTV.Live.watch('noti', refresh, { immediate: true });
+    if (!stopNoti) {
+      claimNotiLeader();
+      if (bc) { try { bc.postMessage({ type: 'noti-ask' }); } catch (_) {} }
+      stopNoti = TTV.Live.watch('noti', refresh, { immediate: true });
+    }
     if (fetched) {
       try {
         if (kind === 'badge') cb(lastUnread);
@@ -327,6 +401,7 @@ window.TTV = window.TTV || {};
       publishLocal();
     },
     watchBadge: function (cb) { return addWatch(badgeCbs, cb, 'badge'); },
-    watchList: function (cb) { return addWatch(listCbs, cb, 'list'); }
+    watchList: function (cb) { return addWatch(listCbs, cb, 'list'); },
+    canPrune: function () { return isNotiLeader; }
   };
 })(window.TTV);

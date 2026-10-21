@@ -17,6 +17,7 @@ TTV.screens = TTV.screens || {};
   var choosing = false;
   var quotes = [];
   var quotesSig = '';
+  var quoteStamp = '';
   var POLL_MS = 4000;
   var expiring = false;
 
@@ -202,10 +203,12 @@ TTV.screens = TTV.screens || {};
     if (choosing || !order) return;
     choosing = true;
     var yes = dlg.querySelector('[data-pick-yes]'); yes.disabled = true;
-    TTV.api.chooseQuote(order.id, q.id).then(function () {
-      choosing = false; closePickDlg(); stopTick();
+    TTV.api.chooseQuote(order.id, q.id).then(function (res) {
+      choosing = false; closePickDlg(); stopTick(); stopPoll();
       TTV.Components.toast(t('quotes.pick.done'), 'success');
-      return refresh(true);
+      if (res && res.order) order = res.order;
+      quotes = (res && res.quotes) || [q];
+      paintMatched();
     }).catch(function (err) {
       choosing = false; yes.disabled = false;
       var code = err && err.code;
@@ -237,9 +240,14 @@ TTV.screens = TTV.screens || {};
     if (polling) { pendingRefresh = true; return Promise.resolve(); }
     var id = order.id;
     polling = true;
-    return TTV.api.listOrderQuotes(id).then(function (res) {
+    return TTV.api.listOrderQuotes(id, { poll: !force, since: quoteStamp }).then(function (res) {
       polling = false;
       if (!rootEl || !order || order.id !== id) return;
+      if (res && res.unchanged) {
+        if (pendingRefresh) { pendingRefresh = false; return refresh(false); }
+        return;
+      }
+      if (res && res.stamp) quoteStamp = res.stamp;
       order = res.order;
       if (order.status === 'cancelled') {
         stopPoll(); stopTick();
@@ -436,7 +444,7 @@ TTV.screens = TTV.screens || {};
     render: function (container, ctx) {
       this.destroy();
       rootEl = container;
-      expiring = false; choosing = false; polling = false; pendingRefresh = false; quotes = []; quotesSig = '';
+      expiring = false; choosing = false; polling = false; pendingRefresh = false; quotes = []; quotesSig = ''; quoteStamp = '';
       rootEl.addEventListener('click', onPickClick);
       var id = ctx && ctx.params && ctx.params.id;
       orderId = id || '';
@@ -446,6 +454,7 @@ TTV.screens = TTV.screens || {};
       var ready = TTV.pricing && TTV.pricing.ready ? TTV.pricing.ready() : Promise.resolve();
       ready.then(function () { return TTV.api.listOrderQuotes(id); }).then(function (res) {
         var row = res.order;
+        if (res && res.stamp) quoteStamp = res.stamp;
         order = row; quotes = res.quotes; quotesSig = signature(quotes);
         if (row.status === 'cancelled') {
           TTV.Components.toast(row.cancel_reason === 'Không tìm được thợ' ? t('quotes.expired') : t('quotes.cancelled'), 'info');
@@ -465,7 +474,7 @@ TTV.screens = TTV.screens || {};
       rootEl = null;
       order = null;
       orderId = '';
-      quotes = [];
+      quotes = []; quotesSig = ''; quoteStamp = '';
       expiring = false; choosing = false; polling = false; pendingRefresh = false;
     }
   };

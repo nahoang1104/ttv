@@ -2,7 +2,7 @@
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
 
-$allowedKind = array('avatar', 'order-images', 'order-videos', 'banners');
+$allowedKind = array('avatar', 'order-images', 'order-videos', 'banners', 'coupon-images');
 $allowedExt = array('jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'bmp', 'mp4', 'webm', 'mov', 'm4v', 'bin');
 $maxBytes = 80 * 1024 * 1024;
 

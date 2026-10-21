@@ -10,7 +10,9 @@ TTV.screens = TTV.screens || {};
   var sort = 'newest';    // giữ lựa chọn sắp xếp khi quay lại từ chi tiết đơn
   var data = null;        // kết quả api.listMarketOrders gần nhất
   var unwatch = null;
+  var remTimer = null;
   var listSig = '';
+  var orderStamp = '';
   var loading = false;
   var pendingSilent = false;
 
@@ -41,7 +43,7 @@ TTV.screens = TTV.screens || {};
     if (o.distance_km > 0) chips.push(kmText(o.distance_km));
     if (o.weight_name) chips.push(o.weight_name);
     chips.push(t('vendorMarket.workers', { n: o.workers }));
-    var rem = remainingText(o.remaining_ms);
+    var rem = remainingText((Number(o.deadline) || 0) - Date.now());
     return '<a class="vm-card" href="#/vendor/market/' + esc(o.id) + '">' +
       '<div class="vm-card__head">' +
         '<span class="vm-card__icon" aria-hidden="true">' + esc(o.service_icon) + '</span>' +
@@ -56,7 +58,7 @@ TTV.screens = TTV.screens || {};
       '<div class="vm-chips">' + chips.map(function (c) { return '<span>' + esc(c) + '</span>'; }).join('') + '</div>' +
       '<div class="vm-card__foot">' +
         '<div class="vm-offer"><small>' + esc(t('vendorMarket.offer')) + '</small><b>' + esc(vnd(o.offer)) + '</b></div>' +
-        (rem ? '<span class="vm-remaining">' + esc(rem) + '</span>' : '') +
+        (rem ? '<span class="vm-remaining" data-deadline="' + esc(o.deadline) + '">' + esc(rem) + '</span>' : '') +
       '</div></a>';
   }
 
@@ -104,7 +106,11 @@ TTV.screens = TTV.screens || {};
       : skip.blocked_workers
         ? t('vendorMarket.empty.workers', { n: skip.blocked_workers })
         : t('vendorMarket.empty.desc');
-    boxEl.innerHTML = toolbarMarkup(list.length, skip) +
+    var holdNote = skip.quote_hold
+      ? C.notice(t('vendorMarket.quoteHold.desc', { code: skip.quote_code || '' }), t('vendorMarket.quoteHold.title')) +
+        '<button type="button" class="btn btn-secondary btn-block" data-route="/vendor/quotes" style="margin-bottom:12px">' + esc(t('vendorMarket.quoteHold.cta')) + '</button>'
+      : '';
+    boxEl.innerHTML = toolbarMarkup(list.length, skip) + holdNote +
       (list.length
         ? '<div class="vm-list">' + list.map(cardMarkup).join('') + '</div>'
         : C.emptyState(t('vendorMarket.empty.title'), emptyDesc, { icon: '▤' }));
@@ -114,19 +120,29 @@ TTV.screens = TTV.screens || {};
     var r = (res && res.readiness) || {};
     var orders = (res && res.orders) || [];
     var skip = (res && res.skip) || {};
-    return [r.ready ? '1' : '0', r.blocked ? '1' : '0', skip.busy_job ? '1' : '0', skip.busy_code || '', skip.team_free, skip.blocked_capacity || 0].join(':') + '|' + orders.map(function (o) {
+    return [r.ready ? '1' : '0', r.blocked ? '1' : '0', skip.busy_job ? '1' : '0', skip.busy_code || '', skip.quote_hold ? '1' : '0', skip.quote_code || '', skip.team_free, skip.blocked_capacity || 0].join(':') + '|' + orders.map(function (o) {
       return o.id + ':' + ((o.my_quote && o.my_quote.status) || '') + ':' + o.offer;
     }).join('|');
   }
-  function load(silent, retriesLeft) {
+  function load(silent, retriesLeft, forceFull) {
     if (loading) { pendingSilent = true; return; }
     retriesLeft = retriesLeft == null ? 0 : retriesLeft;
     var my = ++token;
     loading = true;
-    if (!silent && boxEl) boxEl.innerHTML = C.loading(t('common.loading'));
-    TTV.api.listMarketOrders({ sort: sort }).then(function (res) {
+    if (!silent && boxEl && !data) boxEl.innerHTML = C.loading(t('common.loading'));
+    TTV.api.listMarketOrders({
+      sort: sort,
+      poll: !!silent && !forceFull,
+      since: orderStamp,
+      full: !!forceFull
+    }).then(function (res) {
       loading = false;
       if (my !== token || !boxEl) return;
+      if (res && res.unchanged) {
+        if (pendingSilent) { pendingSilent = false; load(true); }
+        return;
+      }
+      if (res && res.stamp) orderStamp = res.stamp;
       var nextSig = marketSig(res);
       if (silent && retriesLeft > 0 && nextSig === listSig) {
         setTimeout(function () { if (token === my && boxEl) load(true, retriesLeft - 1); }, 400);
@@ -158,7 +174,7 @@ TTV.screens = TTV.screens || {};
       return;
     }
     var btn = e.target.closest('[data-vm-action="refresh"]');
-    if (btn && boxEl && boxEl.contains(btn)) load(false);
+    if (btn && boxEl && boxEl.contains(btn)) load(false, 0, true);
   }
 
   function render(box) {
@@ -166,7 +182,16 @@ TTV.screens = TTV.screens || {};
     boxEl = box;
     clickHandler = onClick;
     box.addEventListener('click', clickHandler);
-    load(false);
+    if (data) paint();
+    load(!!data);
+    remTimer = setInterval(function () {
+      if (!boxEl) return;
+      var els = boxEl.querySelectorAll('.vm-remaining');
+      for (var i = 0; i < els.length; i++) {
+        var dl = Number(els[i].getAttribute('data-deadline')) || 0;
+        els[i].textContent = remainingText(dl - Date.now());
+      }
+    }, 15000);
     if (TTV.Live && TTV.Live.watch) {
       unwatch = TTV.Live.watch('orders', function (fromPoll) { load(true, fromPoll ? 0 : 4); }, { immediate: false });
     }
@@ -175,7 +200,7 @@ TTV.screens = TTV.screens || {};
     token++;
     loading = false;
     pendingSilent = false;
-    listSig = '';
+    if (remTimer) { clearInterval(remTimer); remTimer = null; }
     if (unwatch) { unwatch(); unwatch = null; }
     if (boxEl && clickHandler) boxEl.removeEventListener('click', clickHandler);
     boxEl = null; clickHandler = null;

@@ -9,7 +9,7 @@
     { id:'orders', title:'Đơn hàng', desc:'Theo dõi và hỗ trợ xử lý đơn', icon:'▣', group:'ops', roles:STAFF, route:'/admin/orders', own:true },
     { id:'vendors', title:'Thợ & tổ đội', desc:'Tài khoản, hồ sơ và trạng thái hoạt động', icon:'⚒', group:'ops', roles:STAFF, route:'/admin/vendors', own:true },
     { id:'finance', title:'Tài chính', desc:'Giao dịch, ví và yêu cầu rút tiền', icon:'₫', group:'finance', roles:STAFF, route:'/admin/finance' },
-    { id:'promotions', title:'Khuyến mãi', desc:'Mã giảm giá và chương trình ưu đãi', icon:'％', group:'ops', roles:STAFF, route:'/admin/promotions' },
+    { id:'promotions', title:'Khuyến mãi', desc:'Mã giảm giá và chương trình ưu đãi', icon:'％', group:'ops', roles:STAFF, route:'/admin/promotions', own:true },
     { id:'reports', title:'Báo cáo', desc:'Báo cáo do người dùng gửi và báo cáo vận hành', icon:'⚑', group:'ops', roles:STAFF, route:'/admin/reports' },
     { id:'reviews', title:'Đánh giá', desc:'Đánh giá và phản hồi sau đơn hàng', icon:'★', group:'ops', roles:STAFF, route:'/admin/reviews' },
     { id:'notifications', title:'Thông báo', desc:'Gửi thông báo tới người dùng', icon:'♧', group:'ops', roles:STAFF, route:'/admin/notifications' },
@@ -37,6 +37,7 @@
   function activeSection(path) {
     if (path === '/admin' || path === '/admin/dashboard') return 'home';
     if (path.indexOf('/admin/finance') === 0) return 'finance';
+    if (path.indexOf('/admin/promotions') === 0) return 'ops';
     if (path === '/admin/more' || ['/admin/settings','/admin/content','/admin/audit-logs'].indexOf(path) >= 0) return 'more';
     return 'ops';
   }

@@ -8,6 +8,7 @@ TTV.screens = TTV.screens || {};
   var boxEl = null, clickHandler = null, unwatch = null;
   var jobs = [];
   var listSig = '';
+  var orderStamp = '';
   var loading = false;
   var pendingSilent = false;
 
@@ -48,15 +49,24 @@ TTV.screens = TTV.screens || {};
     boxEl.innerHTML = '<div class="vm-meta"><span>' + esc(t('vendorJobs.count', { n: jobs.length })) + '</span></div>' +
       '<div class="vm-list">' + jobs.map(cardMarkup).join('') + '</div>';
   }
-  function load(silent, retriesLeft) {
+  function load(silent, retriesLeft, forceFull) {
     if (loading) { pendingSilent = true; return; }
     retriesLeft = retriesLeft == null ? 0 : retriesLeft;
     var my = ++token;
     loading = true;
-    if (!silent && boxEl) boxEl.innerHTML = C.loading(t('common.loading'));
-    TTV.api.listVendorJobs().then(function (res) {
+    if (!silent && boxEl && !jobs.length) boxEl.innerHTML = C.loading(t('common.loading'));
+    TTV.api.listVendorJobs({
+      poll: !!silent && !forceFull,
+      since: orderStamp,
+      full: !!forceFull
+    }).then(function (res) {
       loading = false;
       if (my !== token || !boxEl) return;
+      if (res && res.unchanged) {
+        if (pendingSilent) { pendingSilent = false; load(true); }
+        return;
+      }
+      if (res && res.stamp) orderStamp = res.stamp;
       var next = (res && res.jobs) || [];
       var nextSig = jobsSig(next);
       if (silent && retriesLeft > 0 && nextSig === listSig) {
@@ -82,14 +92,15 @@ TTV.screens = TTV.screens || {};
   }
   function onClick(e) {
     var btn = e.target.closest('[data-vj-action="refresh"]');
-    if (btn && boxEl && boxEl.contains(btn)) load(false);
+    if (btn && boxEl && boxEl.contains(btn)) load(false, 0, true);
   }
   function render(box) {
     destroy();
     boxEl = box;
     clickHandler = onClick;
     box.addEventListener('click', clickHandler);
-    load(false);
+    if (jobs.length) paint();
+    load(!!jobs.length);
     if (TTV.Live && TTV.Live.watch) {
       unwatch = TTV.Live.watch('orders', function (fromPoll) { load(true, fromPoll ? 0 : 4); }, { immediate: false });
     }
@@ -98,8 +109,6 @@ TTV.screens = TTV.screens || {};
     token++;
     loading = false;
     pendingSilent = false;
-    listSig = '';
-    jobs = [];
     if (unwatch) { unwatch(); unwatch = null; }
     if (boxEl && clickHandler) boxEl.removeEventListener('click', clickHandler);
     boxEl = null; clickHandler = null;

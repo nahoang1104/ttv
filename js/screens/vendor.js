@@ -16,6 +16,8 @@ TTV.screens = TTV.screens || {};
   var pages = {};
   var stopLive = null;
   var stopUnread = null;
+  var dashStamp = '';
+  var lastDash = null;
 
   function t(key, params) { return TTV.I18n.t(key, params); }
   function esc(v) { return C.escape(v); }
@@ -177,16 +179,24 @@ TTV.screens = TTV.screens || {};
     currentView = 'home';
     var my = ++token, root = app();
     root.innerHTML = C.loading(t('common.loading'));
-    TTV.api.getVendorDashboard().then(function (d) {
+    TTV.api.getVendorDashboard({ poll: !!dashStamp, since: dashStamp }).then(function (d) {
       if (my !== token) return;
+      if (d && d.unchanged && lastDash) d = lastDash;
+      else {
+        lastDash = d;
+        if (d && d.stamp) dashStamp = d.stamp;
+      }
       root.innerHTML = homeMarkup(d);
       bindAvatarFallback(root, d.vendor.name);
       bindCommon();
       stopUnread = TTV.Utils.watchUnread(root);
       if (TTV.Live && TTV.Live.watch) {
         stopLive = TTV.Live.watch('orders', function () {
-          TTV.api.getVendorDashboard().then(function (next) {
+          TTV.api.getVendorDashboard({ poll: true, since: dashStamp }).then(function (next) {
             if (currentView !== 'home') return;
+            if (next && next.unchanged) return;
+            lastDash = next;
+            if (next && next.stamp) dashStamp = next.stamp;
             var q = root.querySelector('[data-vendor-stat="quotes"]');
             var j = root.querySelector('[data-vendor-stat="jobs"]');
             if (q) q.textContent = String(next.ongoing.pendingQuotes);
