@@ -106,11 +106,7 @@ TTV.screens = TTV.screens || {};
       : skip.blocked_workers
         ? t('vendorMarket.empty.workers', { n: skip.blocked_workers })
         : t('vendorMarket.empty.desc');
-    var holdNote = skip.quote_hold
-      ? C.notice(t('vendorMarket.quoteHold.desc', { code: skip.quote_code || '' }), t('vendorMarket.quoteHold.title')) +
-        '<button type="button" class="btn btn-secondary btn-block" data-route="/vendor/quotes" style="margin-bottom:12px">' + esc(t('vendorMarket.quoteHold.cta')) + '</button>'
-      : '';
-    boxEl.innerHTML = toolbarMarkup(list.length, skip) + holdNote +
+    boxEl.innerHTML = toolbarMarkup(list.length, skip) +
       (list.length
         ? '<div class="vm-list">' + list.map(cardMarkup).join('') + '</div>'
         : C.emptyState(t('vendorMarket.empty.title'), emptyDesc, { icon: '▤' }));

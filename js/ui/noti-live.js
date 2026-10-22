@@ -34,14 +34,8 @@ window.TTV = window.TTV || {};
   function hasSubs() {
     return Object.keys(groups).some(function (k) { return groups[k].length; });
   }
-  function bustHotTables(topic) {
-    if (!TTV.Store || typeof TTV.Store.invalidate !== 'function') return;
-    if (topic === 'orders' || topic === '*') TTV.Store.invalidate(['orders', 'quotes', 'order_media']);
-    if (topic === 'noti' || topic === '*') TTV.Store.invalidate(['notifications', 'noti_marks']);
-  }
   function fire(topic, fromPoll, only) {
-    // Ping (hành động của chính mình) xóa cache để đọc mới ngay. Poll KHÔNG xóa cache: thông báo mới được phát hiện qua mốc noti_marks.
-    if (!fromPoll) bustHotTables(topic);
+    // Không invalidate bảng nặng lúc ping: ghi đã xóa cache bảng vừa ghi; poll/tab khác đọc mốc (noti_marks / orders_stamp / coupons_stamp) rồi delta.
     var seen = {};
     function run(t) {
       (groups[t] || []).forEach(function (w) {
@@ -53,6 +47,13 @@ window.TTV = window.TTV || {};
     if (topic === '*') Object.keys(groups).forEach(run);
     else { run(topic); if (!only) run('*'); }
   }
+  function livePath() {
+    return String(location.hash || '').replace(/^#/, '').split('?')[0];
+  }
+  // Đang chờ báo giá: hỏi mốc đơn mỗi 4s. Còn lại 8s. Promo 8s (ping vẫn tức thì).
+  function ordersEvery() {
+    return /^\/orders\/[^/]+\/quotes\/?$/.test(livePath()) ? 1 : 2;
+  }
   // Tab hiện: chuông 4s (chỉ mốc noti_marks). Đơn/báo giá 8s — bảng orders/quotes nặng hơn nhiều.
   // Tab ẩn: chỉ chuông, 8s; đơn tự làm mới khi quay lại tab.
   function onTick() {
@@ -63,7 +64,8 @@ window.TTV = window.TTV || {};
       return;
     }
     if (isNotiLeader) fire('noti', true, true);
-    if (tickN % 2 === 0) fire('orders', true, true);
+    if (groups.promo && groups.promo.length && tickN % 2 === 0) fire('promo', true, true);
+    if (groups.orders && groups.orders.length && tickN % ordersEvery() === 0) fire('orders', true, true);
   }
   function scheduleTick() {
     if (timer) { clearTimeout(timer); timer = null; }
@@ -153,6 +155,7 @@ window.TTV = window.TTV || {};
   var lastUnreadIds = {};
   var cached = [];
   var fetched = false;
+  var CACHE_KEY = 'ttv_noti_cache';
   var heldRead = {};
   var holdUntil = 0;
   var badgeCbs = [];
@@ -241,6 +244,13 @@ window.TTV = window.TTV || {};
       return s && s.account_id ? String(s.account_type || '') + ':' + s.account_id : '';
     } catch (_) { return ''; }
   }
+  function isMineRow(r) {
+    if (!r) return false;
+    var k = sessionKey();
+    if (!k) return false;
+    var type = r.recipient_type || 'customer';
+    return k === type + ':' + String(r.recipient_id || '');
+  }
   function listSig(rows) {
     return (rows || []).map(function (r) {
       return r.id + ':' + (r.is_read ? '1' : '0') + ':' + String(r.created_at || '');
@@ -307,8 +317,50 @@ window.TTV = window.TTV || {};
     lastDel = Number(data.del) || 0;
     apply(data.rows, true);
   }
+  function persistCache() {
+    try {
+      sessionStorage.setItem(CACHE_KEY, JSON.stringify({
+        key: lastKey,
+        stamp: lastStamp,
+        del: lastDel,
+        rows: (cached || []).slice(0, 100).map(function (r) {
+          var o = Object.assign({}, r);
+          delete o._local;
+          return o;
+        })
+      }));
+    } catch (_) {}
+  }
+  function hydrateCache() {
+    try {
+      var o = JSON.parse(sessionStorage.getItem(CACHE_KEY) || 'null');
+      if (!o || o.key !== sessionKey() || !Array.isArray(o.rows)) return;
+      cached = o.rows.filter(isMineRow);
+      fetched = true;
+      lastKey = o.key;
+      lastStamp = o.stamp || '';
+      lastDel = Number(o.del) || 0;
+      lastSig = listSig(cached);
+      lastUnread = 0;
+      lastUnreadIds = {};
+      cached.forEach(function (r) {
+        if (r && !r.is_read) { lastUnread += 1; lastUnreadIds[r.id] = true; }
+      });
+    } catch (_) {}
+  }
+  hydrateCache();
+  setTimeout(function () { ensureNotiWatch(); }, 0);
   function apply(rows, fromBc) {
     var key = sessionKey();
+    var map = {};
+    (rows || []).concat(cached || []).forEach(function (r) {
+      if (!r || !r.id) return;
+      var id = String(r.id);
+      if (!map[id] || String(r.created_at || '') >= String(map[id].created_at || '')) map[id] = r;
+    });
+    rows = Object.keys(map).map(function (id) { return map[id]; }).filter(isMineRow).sort(function (a, b) {
+      return String(b.created_at || '').localeCompare(String(a.created_at || ''));
+    });
     if (Date.now() < holdUntil) {
       rows.forEach(function (r) { if (heldRead[r.id]) r.is_read = true; });
     } else heldRead = {};
@@ -338,6 +390,7 @@ window.TTV = window.TTV || {};
     }
     cached = rows;
     fetched = true;
+    persistCache();
     paintTitle(unread);
     if (changed) {
       badgeCbs.slice().forEach(function (cb) { try { cb(unread); } catch (_) {} });
@@ -402,6 +455,19 @@ window.TTV = window.TTV || {};
     },
     watchBadge: function (cb) { return addWatch(badgeCbs, cb, 'badge'); },
     watchList: function (cb) { return addWatch(listCbs, cb, 'list'); },
+    prepend: function (row) {
+      if (!row || !row.id || !isMineRow(row)) return;
+      ensureNotiWatch();
+      var copy = Object.assign({}, row, { _local: true });
+      cached = [copy].concat((cached || []).filter(function (r) { return String(r.id) !== String(copy.id); }));
+      fetched = true;
+      lastKey = sessionKey();
+      publishLocal();
+      persistCache();
+      if (copy.event === 'wallet.refund' && TTV.Components && TTV.Components.toast) {
+        TTV.Components.toast(copy.body || copy.title || 'Đã hoàn tiền vào ví', 'success');
+      }
+    },
     canPrune: function () { return isNotiLeader; }
   };
 })(window.TTV);

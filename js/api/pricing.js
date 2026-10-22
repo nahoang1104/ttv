@@ -21,7 +21,7 @@ window.TTV = window.TTV || {};
     var c = cfg || {};
     var base = Math.max(0, Math.round(num(opts.basePrice)));
     var w = weightOf(opts.weight || 'medium');
-    var km = Math.max(0, num(opts.km));
+    var km = opts.needUnload === false ? 0 : Math.max(0, num(opts.km));
     var kmShown = Math.round(km * 100) / 100;
     var kmFee = Math.max(0, num(c.km_fee));
     var distance = Math.round(kmShown * kmFee);

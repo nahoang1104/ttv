@@ -238,7 +238,7 @@ window.TTV = window.TTV || {};
     }
   };
 
-  var store = isKio() ? kioStore : localStore;
+  var store = kioStore;
   TTV.Store = store;
   TTV.store = store;
 })(window.TTV);

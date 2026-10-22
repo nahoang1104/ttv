@@ -99,7 +99,10 @@ window.TTV = window.TTV || {};
     return '<article class="admin-record admin-record--link ap-coupon-card" role="link" tabindex="0" data-ap-open-c="' + esc(c.code) + '">' +
       '<span class="admin-record__avatar ap-thumb">' + thumb + '</span><div class="admin-record__main"><strong>' + esc(c.code) + '</strong>' +
       '<p>' + esc(c.title) + '</p><div class="admin-record__badges">' + lifeBadge(c.life) +
-      C.badge(off, 'info') + C.badge(t('adminPromo.grants', { n: c.grants }), 'neutral') + '</div></div>' +
+      C.badge(off, 'info') + C.badge(t('adminPromo.grants', { n: c.grants }), 'neutral') +
+      (c.searchable ? '' : C.badge(t('adminPromo.search.off'), 'warning')) +
+      (c.issue_limit ? C.badge(t('adminPromo.issued', { n: c.grants, m: c.issue_limit }), 'neutral') : '') +
+      '</div></div>' +
       '<span class="admin-record__chev" aria-hidden="true">›</span></article>';
   }
   function catalogFrom(svcs) {
@@ -222,6 +225,8 @@ window.TTV = window.TTV || {};
       '<div class="admin-kv__row"><dt>' + esc(t('adminPromo.f.discount')) + '</dt><dd>' + esc(off) + (c.max_discount ? ' · ' + esc(t('adminPromo.f.cap', { n: money(c.max_discount) })) : '') + '</dd></div>' +
       '<div class="admin-kv__row"><dt>' + esc(t('adminPromo.f.minOrder')) + '</dt><dd>' + esc(c.min_order ? money(c.min_order) : t('adminPromo.f.noMin')) + '</dd></div>' +
       '<div class="admin-kv__row"><dt>' + esc(t('adminPromo.f.minWorkers')) + '</dt><dd>' + esc(t('adminPromo.workers', { n: c.min_workers })) + '</dd></div>' +
+      '<div class="admin-kv__row"><dt>' + esc(t('adminPromo.f.searchable')) + '</dt><dd>' + esc(t(c.searchable ? 'adminPromo.search.on' : 'adminPromo.search.off')) + '</dd></div>' +
+      '<div class="admin-kv__row"><dt>' + esc(t('adminPromo.f.issueLimit')) + '</dt><dd>' + esc(c.issue_limit ? t('adminPromo.issued', { n: c.grants, m: c.issue_limit }) : t('adminPromo.issuedOpen', { n: c.grants })) + '</dd></div>' +
       '<div class="admin-kv__row"><dt>' + esc(t('adminPromo.f.services')) + '</dt><dd>' + esc(couponServicesLabel(c)) + '</dd></div>' +
       '<div class="admin-kv__row"><dt>' + esc(t('adminPromo.f.expires')) + '</dt><dd>' + esc(whenFull(c.expires_at)) + '</dd></div></dl>';
   }
@@ -299,10 +304,17 @@ window.TTV = window.TTV || {};
         '<div class="ap-exp-row"><input id="ap-exp" type="date" value="' + esc(dateInput(d.expires_at)) + '" aria-label="' + esc(t('adminPromo.f.expiresDate')) + '">' +
         '<input id="ap-exp-time" type="time" value="' + esc(timeInput(d.expires_at)) + '" aria-label="' + esc(t('adminPromo.f.expiresTime')) + '"></div>',
         t('adminPromo.hint.expires'));
+    var issue = '<div class="field" data-field="searchable">' +
+      C.toggle(t('adminPromo.f.searchable'), d.searchable !== false, { name: 'searchable' }) +
+      '<p class="field-hint">' + esc(t('adminPromo.hint.searchable')) + '</p></div>' +
+      fieldWrap('issue_limit', t('adminPromo.f.issueLimit'),
+        '<input id="ap-qty" type="text" inputmode="numeric" placeholder="' + esc(t('adminPromo.ph.issueLimit')) + '" value="' + esc(d.issue_limit ? String(d.issue_limit) : '') + '">',
+        t('adminPromo.hint.issueLimit'));
     return '<form class="admin-form ap-form" id="ap-c-form" novalidate>' +
       C.card(info, { title: t('adminPromo.section.info') }) +
       C.card(media, { title: t('adminPromo.section.media') }) +
       C.card(deal, { title: t('adminPromo.section.deal') }) +
+      C.card(issue, { title: t('adminPromo.section.issue') }) +
       '<div class="admin-form-actions"><button type="submit" class="btn btn-primary btn-block" id="ap-c-save">' + esc(t(edit ? 'adminPromo.btn.save' : 'adminPromo.btn.create')) + '</button></div></form>';
   }
   function readCouponForm() {
@@ -319,7 +331,9 @@ window.TTV = window.TTV || {};
       expires_at: (document.getElementById('ap-exp') || {}).value,
       expires_time: (document.getElementById('ap-exp-time') || {}).value,
       image_path: form.data.image_path || '',
-      services: (form.data.services || []).slice()
+      services: (form.data.services || []).slice(),
+      searchable: !!(document.querySelector('#ap-c-form [name="searchable"]') || {}).checked,
+      issue_limit: (document.getElementById('ap-qty') || {}).value
     };
   }
   function paintCouponServiceChips() {
@@ -343,7 +357,7 @@ window.TTV = window.TTV || {};
     host = document.querySelector('.admin-content');
     host.innerHTML = C.loading();
     var jobs = [TTV.api.listServices()];
-    if (code) jobs.push(TTV.api.getAdminCoupon(code));
+    if (code) jobs.push(TTV.api.getAdminCoupon(code, { lite: true }));
     Promise.all(jobs).then(function (r) {
       if (my !== token) return;
       var catalog = catalogFrom(r[0]);
@@ -353,7 +367,8 @@ window.TTV = window.TTV || {};
           data: {
             code: TTV.api.generateCouponCode(), title: '', condition: '', discount_type: 'percent',
             discount_value: 10, max_discount: 0, min_order: 100000, min_workers: 2, expires_at: '',
-            image_path: '', services: catalog.map(function (s) { return s.code; })
+            image_path: '', services: catalog.map(function (s) { return s.code; }),
+            searchable: true, issue_limit: 0
           }
         };
         paintCouponForm(); return;
@@ -400,10 +415,25 @@ window.TTV = window.TTV || {};
   }
 
   /* ===================== Cấp mã ===================== */
-  function grantFreeCount() {
+  var GRANT_AUD = ['all', 'new', 'done'];
+  function grantAudOk(c) {
+    var aud = (grantPick && grantPick.audience) || 'all';
+    var n = Number(c && c.completed) || 0;
+    if (aud === 'new') return n === 0;
+    if (aud === 'done') return n >= 1;
+    return true;
+  }
+  function grantFreeIds() {
     return (grantPick.customers || []).filter(function (c) {
-      return c.status !== 'locked' && !c.coupon_status;
-    }).length;
+      return grantAudOk(c) && c.status !== 'locked' && !c.coupon_status;
+    }).map(function (c) { return c.id; });
+  }
+  function grantFreeCount() { return grantFreeIds().length; }
+  function grantAllLabel() {
+    var n = grantFreeCount(), aud = (grantPick && grantPick.audience) || 'all';
+    if (aud === 'new') return t('adminPromo.grant.allNew', { n: n });
+    if (aud === 'done') return t('adminPromo.grant.allDone', { n: n });
+    return t('adminPromo.grant.all', { n: n });
   }
   function grantSelectedIds() {
     return Object.keys((grantPick && grantPick.ids) || {});
@@ -416,6 +446,7 @@ window.TTV = window.TTV || {};
     return d;
   }
   function grantMatches(c) {
+    if (!grantAudOk(c)) return false;
     var q = fold((grantPick && grantPick.q) || '').trim();
     if (!q) return true;
     if (fold([c.name, c.phone, c.email].join(' ')).indexOf(q) >= 0) return true;
@@ -442,9 +473,10 @@ window.TTV = window.TTV || {};
       var tag = c.status === 'locked' ? t('adminPromo.grant.locked')
         : c.coupon_status === 'used' ? t('adminPromo.grant.used')
           : c.coupon_status === 'available' ? t('adminPromo.grant.held') : '';
+      var kind = (Number(c.completed) || 0) ? t('adminPromo.grant.doneN', { n: c.completed }) : t('adminPromo.grant.newTag');
       return '<button type="button" class="ap-grant-row' + (on ? ' is-selected' : '') + (busy ? ' is-disabled' : '') + '" data-ap-pick="' + esc(c.id) + '"' + (busy ? ' disabled' : '') + '>' +
         '<span class="ap-grant-ava">' + esc(grantInitial(c.name || c.phone)) + '</span>' +
-        '<span class="ap-grant-meta"><strong>' + esc(c.name || t('adminPromo.noName')) + '</strong><p>' + esc(c.phone || '') + '</p></span>' +
+        '<span class="ap-grant-meta"><strong>' + esc(c.name || t('adminPromo.noName')) + '</strong><p>' + esc(c.phone || '') + ' · ' + esc(kind) + '</p></span>' +
         (tag ? C.badge(tag, c.coupon_status === 'used' ? 'neutral' : 'info') : '<span class="ap-grant-tick" aria-hidden="true"></span>') +
         '</button>';
     }).join('') + '</div>' + extra;
@@ -460,7 +492,13 @@ window.TTV = window.TTV || {};
       go.classList.toggle('is-off', !n);
     }
     var all = document.querySelector('[data-ap="confirm-grant-all"]');
-    if (all) all.textContent = t(grantPick.readyAll ? 'adminPromo.grant.confirmAllNow' : 'adminPromo.grant.all', { n: grantFreeCount() });
+    if (all) all.textContent = grantPick.readyAll ? t('adminPromo.grant.confirmAllNow') : grantAllLabel();
+    var chips = document.querySelector('[data-ap-grant-aud]');
+    if (chips) {
+      chips.querySelectorAll('[data-ap-aud]').forEach(function (b) {
+        b.classList.toggle('is-selected', b.getAttribute('data-ap-aud') === (grantPick.audience || 'all'));
+      });
+    }
     var warn = document.querySelector('[data-ap-grant-warn]');
     if (warn) warn.hidden = !grantPick.readyAll;
   }
@@ -488,7 +526,7 @@ window.TTV = window.TTV || {};
       C.toast(t('adminPromo.grant.blocked'), 'error'); return;
     }
     closeModals();
-    grantPick = { q: '', ids: {}, customers: [], readyAll: false };
+    grantPick = { q: '', ids: {}, customers: [], readyAll: false, audience: 'all' };
     var code = detail.data.coupon.code;
     var cached = Array.isArray(detail.data.targets) ? detail.data.targets : null;
     document.body.insertAdjacentHTML('beforeend',
@@ -499,6 +537,9 @@ window.TTV = window.TTV || {};
       '<p class="ap-grant__lead">' + esc(t('adminPromo.grant.body', { code: code })) + '</p>' +
       '<label class="ap-grant__search"><span aria-hidden="true">⌕</span>' +
       '<input id="ap-grant-q" type="search" inputmode="tel" placeholder="' + esc(t('adminPromo.grant.search')) + '" autocomplete="off"></label>' +
+      '<div class="admin-chip-row ap-grant-aud" data-ap-grant-aud role="group">' + GRANT_AUD.map(function (id) {
+        return chip('data-ap-aud', id, t('adminPromo.grant.aud.' + id), id === 'all');
+      }).join('') + '</div>' +
       '<p class="field-error" data-ap-err="user_id" hidden></p>' +
       '<div data-ap-grant-list>' + (cached && cached.length ? '' : C.loading()) + '</div>' +
       '<p class="ap-grant-warn" data-ap-grant-warn hidden>' + esc(t('adminPromo.grant.allWarn')) + '</p>' +
@@ -520,13 +561,14 @@ window.TTV = window.TTV || {};
     setBusy(true);
     var my = token, code = detail.data.coupon.code;
     var req = all
-      ? TTV.api.grantCouponToCustomers(code, { all: true })
+      ? TTV.api.grantCouponToCustomers(code, { user_ids: grantFreeIds() })
       : TTV.api.grantCouponToCustomers(code, { user_ids: ids });
     req.then(function (r) {
       if (my !== token) return;
       grantPick = null;
       closeModals();
-      C.toast(t(r.granted ? 'adminPromo.toast.grantedN' : 'adminPromo.toast.grantedNone', { n: r.granted }), r.granted ? 'success' : 'info');
+      var quotaNone = !r.granted && r.skipped && r.skipped.quota;
+      C.toast(t(r.granted ? 'adminPromo.toast.grantedN' : (quotaNone ? 'adminPromo.toast.quota' : 'adminPromo.toast.grantedNone'), { n: r.granted }), r.granted ? 'success' : 'info');
       loadCouponDetail(my, code);
     }).catch(function (e) {
       if (my !== token) return;
@@ -703,20 +745,34 @@ window.TTV = window.TTV || {};
       }
       if (a === 'confirm-disable' || a === 'confirm-enable') {
         setBusy(true); var myc = token, st = a === 'confirm-disable' ? 'disabled' : 'active';
-        TTV.api.setCouponStatus(detail.data.coupon.code, st).then(function () {
-          if (myc !== token) return; closeModals(); C.toast(t(st === 'disabled' ? 'adminPromo.toast.disabled' : 'adminPromo.toast.enabled'), 'success');
-          loadCouponDetail(myc, detail.data.coupon.code);
+        TTV.api.setCouponStatus(detail.data.coupon.code, st).then(function (saved) {
+          if (myc !== token || !detail || !detail.data) return;
+          closeModals();
+          C.toast(t(st === 'disabled' ? 'adminPromo.toast.disabled' : 'adminPromo.toast.enabled'), 'success');
+          var prev = detail.data.coupon;
+          detail.data.coupon = Object.assign({}, prev, saved, { grants: prev.grants, used: prev.used });
+          paintCouponDetail();
         }).catch(function (err) { if (myc !== token) return; setBusy(false); C.toast(msg(err), 'error'); });
         return;
       }
       if (a === 'confirm-hide' || a === 'confirm-show') {
         setBusy(true); var myh = token, on = a === 'confirm-show';
-        TTV.api.setBannerActive(bannerDetail.id, on).then(function () {
-          if (myh !== token) return; closeModals(); C.toast(t(on ? 'adminPromo.toast.shown' : 'adminPromo.toast.hidden'), 'success');
-          loadBannerDetail(myh, bannerDetail.id);
+        TTV.api.setBannerActive(bannerDetail.id, on).then(function (saved) {
+          if (myh !== token) return;
+          closeModals();
+          C.toast(t(on ? 'adminPromo.toast.shown' : 'adminPromo.toast.hidden'), 'success');
+          bannerDetail = saved;
+          paintBannerDetail();
         }).catch(function (err) { if (myh !== token) return; setBusy(false); C.toast(msg(err), 'error'); });
         return;
       }
+      return;
+    }
+    if ((el = target.closest('[data-ap-aud]')) && grantPick) {
+      grantPick.audience = el.getAttribute('data-ap-aud') || 'all';
+      grantPick.ids = {};
+      grantPick.readyAll = false;
+      paintGrantChrome();
       return;
     }
     if ((el = target.closest('[data-ap-pick]')) && grantPick) {

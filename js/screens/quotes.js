@@ -1,7 +1,7 @@
 /* Màn Đang nhận báo giá (khách) — 4.9 (khung) + 5.6 (danh sách báo giá).
    Báo giá của mọi thợ/tổ đội/công ty (đơn 1 thợ lẫn ≥ 2 thợ) xếp thấp → cao; khách tự chọn; tự cập nhật mỗi 4 giây.
    Tự hủy khi hết quote_window_min. Đơn đã ghép thì hiện thợ được chọn.
-   Làm mới: Live ping (tab thợ gửi báo giá) + poll 4 giây từ cache; ping mới xóa cache KIO. */
+   Làm mới: Live ping khi thợ gửi báo giá; poll mốc đơn 4s khi đang ở màn này. */
 window.TTV = window.TTV || {};
 TTV.screens = TTV.screens || {};
 (function (TTV) {
@@ -15,6 +15,7 @@ TTV.screens = TTV.screens || {};
   var polling = false;
   var pendingRefresh = false;
   var choosing = false;
+  var pay = null;
   var quotes = [];
   var quotesSig = '';
   var quoteStamp = '';
@@ -103,6 +104,7 @@ TTV.screens = TTV.screens || {};
     var drop = (order.dropoff && order.dropoff.addr) || '—';
     var km = Number(order.distance_km);
     var kmText = isFinite(km) ? km.toFixed(2).replace('.', ',') + ' km' : '— km';
+    var hasDrop = order.need_unload !== false;
     rootEl.classList.add('is-order');
     rootEl.innerHTML =
       quotesHeader() +
@@ -112,8 +114,10 @@ TTV.screens = TTV.screens || {};
             '<b class="quotes-remain__clock">' + clockSvg() + '<em data-quote-clock>' + esc(formatRemain(remainMs())) + '</em></b></p>' +
           '<p class="quotes-code">' + esc(TTV.Utils.orderCode(order.id)) + '</p>' +
           '<p class="quotes-stop">' + pinSvg('pick') + '<span><b>' + esc(t('quotes.pickup')) + '</b> ' + esc(pick) + '</span></p>' +
-          '<p class="quotes-stop">' + pinSvg('drop') + '<span><b>' + esc(t('quotes.dropoff')) + '</b> ' + esc(drop) + '</span></p>' +
-          '<p class="quotes-km">' + esc(kmText) + '</p>' +
+          (hasDrop
+            ? '<p class="quotes-stop">' + pinSvg('drop') + '<span><b>' + esc(t('quotes.dropoff')) + '</b> ' + esc(drop) + '</span></p>' +
+              '<p class="quotes-km">' + esc(kmText) + '</p>'
+            : '') +
           '<p class="quotes-offer"><span>' + esc(t('quotes.offer')) + '</span><b>' + money(order.user_offer) + '</b></p>' +
         '</section>' +
         '<div data-quote-list>' + listMarkup() + '</div>' +
@@ -180,44 +184,173 @@ TTV.screens = TTV.screens || {};
   }
   function findQuote(id) { for (var i = 0; i < quotes.length; i++) if (quotes[i].id === id) return quotes[i]; return null; }
 
-  /* ----- Chọn thợ ----- */
-  function closePickDlg() { var d = document.querySelector('[data-quotes-pick]'); if (d) d.remove(); }
+  /* ----- Chốt thợ + mã giảm giá ----- */
+  function closePickDlg() {
+    document.querySelectorAll('[data-quotes-pick], .sheet-backdrop.is-quote-pay, .sheet-backdrop.is-order-coupons, .sheet-backdrop[data-cp-detail]').forEach(function (el) { el.remove(); });
+    pay = null;
+  }
+  function couponOf(code) {
+    var key = String(code || '').toUpperCase();
+    return ((pay && pay.coupons) || []).filter(function (c) { return String(c.code) === key; })[0] || null;
+  }
+  function couponFit(c) {
+    if (!c || !pay || !pay.q || !TTV.pricing || !TTV.pricing.applyCoupon) return { ok: false, reason: t('quotes.pay.bad') };
+    return TTV.pricing.applyCoupon(pay.q.price, c, order && order.workers, null, order && order.service);
+  }
+  function payPreview() {
+    if (!pay || !order) return Promise.resolve();
+    return TTV.api.previewQuotePay(order.id, pay.q.id, pay.code).then(function (p) {
+      if (!pay) return;
+      pay.preview = p;
+      if (p && p.ok === false && pay.code) {
+        TTV.Components.toast(p.reason || t('quotes.pay.bad'), 'error');
+        pay.code = '';
+        return TTV.api.previewQuotePay(order.id, pay.q.id, '').then(function (plain) {
+          if (pay) pay.preview = plain;
+        });
+      }
+    }).catch(function (err) {
+      TTV.Components.toast((err && err.message) || t('quotes.pay.bad'), 'error');
+    }).then(function () { paintPaySheet(); });
+  }
+  function couponBlockHtml() {
+    var Ticket = TTV.ui.couponTicket;
+    var picked = pay.code ? (couponOf(pay.code) || (pay.preview && pay.preview.coupon) || { code: pay.code, title: pay.code }) : null;
+    if (picked) {
+      if (Ticket) { Ticket.remember(pay.coupons); }
+      var facts = Ticket && couponOf(picked.code) ? Ticket.facts(picked) : [];
+      return '<div class="order-coupon__picked">' +
+        '<div class="order-coupon__head"><div class="order-coupon__info">' +
+          '<p class="order-coupon__name">' + esc(picked.title || picked.code) + '</p>' +
+          '<div class="order-coupon__codes"><span class="order-coupon__badge">' + esc(t('coupon.badge')) + '</span>' +
+          '<span class="order-coupon__code">' + esc(picked.code) + '</span></div></div>' +
+          '<button type="button" class="order-coupon__clear" data-qp="clear">' + esc(t('order.coupon.remove')) + '</button></div>' +
+        (facts.length ? '<ul class="order-coupon__facts">' + facts.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>' : '') +
+      '</div>';
+    }
+    return '<div class="order-coupon__row">' +
+        '<input type="text" data-qp-code maxlength="20" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="' + esc(t('coupon.placeholder')) + '">' +
+        '<button type="button" class="btn btn-primary" data-qp="apply">' + esc(t('coupon.apply')) + '</button></div>' +
+      '<button type="button" class="order-coupon__mine" data-qp="mine">' +
+        '<span>' + esc(t('order.coupon.mine')) + (pay.coupons.length ? ' (' + pay.coupons.length + ')' : '') + '</span><span class="order-chevron">›</span></button>';
+  }
+  function payBodyHtml() {
+    var q = pay.q, p = pay.preview || { price: q.price, discount: 0, final: q.price };
+    var method = order && order.pay_method === 'wallet' ? t('od.pay.wallet') : t('od.pay.cash');
+    var offLabel = p.discount && pay.code ? t('quotes.pay.offCode', { code: pay.code }) : t('od.pay.coupon');
+    return '<p class="qp-lead">' + esc(t('quotes.pay.lead', { name: q.vendor.name, price: money(q.price) })) + '</p>' +
+      '<h3 class="qp-h">' + esc(t('quotes.pay.coupon')) + '</h3>' +
+      '<section class="order-card order-coupon">' + couponBlockHtml() + '</section>' +
+      '<dl class="qp-sum">' +
+        '<div><dt>' + esc(t('quotes.pay.base')) + '</dt><dd>' + money(p.price) + '</dd></div>' +
+        '<div><dt>' + esc(offLabel) + '</dt><dd>' + (p.discount ? '−' + money(p.discount) : money(0)) + '</dd></div>' +
+        '<div class="is-total"><dt>' + esc(t('quotes.pay.total')) + '</dt><dd>' + money(p.final) + '</dd></div>' +
+        '<div><dt>' + esc(t('quotes.pay.method')) + '</dt><dd>' + esc(method) + '</dd></div>' +
+      '</dl>' +
+      '<p class="quotes-dlg__err" data-pick-err hidden></p>';
+  }
+  function bindPaySheet(box) {
+    if (!box) return;
+    var inp = box.querySelector('[data-qp-code]');
+    if (inp) {
+      inp.addEventListener('input', function () { inp.value = inp.value.toUpperCase().replace(/\s+/g, ''); });
+      inp.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); applyPayCoupon(inp.value, false); }
+      });
+    }
+  }
+  function paintPaySheet() {
+    if (!pay || !pay.q) return;
+    var p = pay.preview || { final: pay.q.price };
+    var existing = document.querySelector('.sheet-backdrop.is-quote-pay');
+    var body = payBodyHtml();
+    var footer = '<div class="order-confirm-acts">' +
+      '<button type="button" class="btn btn-secondary" data-qp="no">' + esc(t('quotes.pick.no')) + '</button>' +
+      '<button type="button" class="btn btn-primary" data-qp="yes">' + esc(t('quotes.pay.confirm', { price: money(p.final) })) + '</button></div>';
+    if (existing) {
+      var b = existing.querySelector('.bottom-sheet__body');
+      var f = existing.querySelector('.bottom-sheet__footer');
+      if (b) b.innerHTML = body;
+      if (f) f.innerHTML = footer;
+      bindPaySheet(existing);
+      return;
+    }
+    document.body.insertAdjacentHTML('beforeend', TTV.Components.sheet(t('quotes.pay.title', { name: pay.q.vendor.name }), body, { footer: footer }));
+    var bd = document.querySelector('.sheet-backdrop:last-of-type');
+    if (bd) { bd.classList.add('is-quote-pay'); bd.setAttribute('data-quotes-pick', ''); bindPaySheet(bd); }
+  }
+  function applyPayCoupon(raw, fromPick) {
+    if (!pay || pay.claiming) return;
+    var code = String(raw || '').replace(/\s+/g, '').toUpperCase();
+    if (!code) { TTV.Components.toast(t('order.coupon.empty'), 'error'); return; }
+    function use(c) {
+      if (c && !couponOf(c.code)) pay.coupons.push(c);
+      pay.code = (c && c.code) || code;
+      payPreview();
+    }
+    if (fromPick || couponOf(code)) {
+      var owned = couponOf(code);
+      var fit = couponFit(owned);
+      if (!owned || !fit.ok) {
+        TTV.Components.toast((fit && fit.reason) || t('quotes.pay.bad'), 'error');
+        return;
+      }
+      use(owned);
+      return;
+    }
+    pay.claiming = true;
+    TTV.api.claimCoupon(code).then(function (c) { pay.claiming = false; use(c); }).catch(function (err) {
+      pay.claiming = false;
+      var msg = (err && err.code === 'COUPON_SOLD_OUT') ? t('coupon.soldOut') : ((err && err.message) || t('quotes.pay.bad'));
+      TTV.Components.toast(msg, 'error');
+    });
+  }
+  function openPayCouponList() {
+    var Ticket = TTV.ui.couponTicket;
+    if (Ticket) Ticket.remember(pay.coupons);
+    var rows = pay.coupons.length && Ticket
+      ? '<div class="cp-list">' + pay.coupons.map(function (c) {
+          var fit = couponFit(c);
+          return Ticket.card(c, 'available', { pick: true, picked: pay.code, disabled: !fit.ok, reason: fit.reason });
+        }).join('') + '</div>'
+      : (Ticket ? Ticket.empty(t('coupon.empty.available.title'), t('order.coupon.none')) : '');
+    document.body.insertAdjacentHTML('beforeend', TTV.Components.sheet(t('order.coupon.pickTitle'), rows));
+    var bd = document.querySelector('.sheet-backdrop:last-of-type');
+    if (bd) bd.classList.add('is-order-coupons');
+  }
   function openPickDlg(q) {
     closePickDlg();
-    document.body.insertAdjacentHTML('beforeend',
-      '<div class="quotes-dlg" data-quotes-pick>' +
-        '<div class="quotes-dlg__card" role="dialog" aria-modal="true">' +
-          '<h3>' + esc(t('quotes.pick.title', { name: q.vendor.name })) + '</h3>' +
-          '<p>' + esc(t('quotes.pick.body', { price: money(q.price) })) + '</p>' +
-          '<p class="quotes-dlg__err" data-pick-err hidden></p>' +
-          '<div class="quotes-dlg__acts">' +
-            '<button type="button" class="quotes-dlg__no" data-pick-no>' + esc(t('quotes.pick.no')) + '</button>' +
-            '<button type="button" class="quotes-dlg__yes quotes-dlg__yes--ok" data-pick-yes>' + esc(t('quotes.pick.yes')) + '</button>' +
-          '</div></div></div>');
-    var dlg = document.querySelector('[data-quotes-pick]');
-    dlg.querySelector('[data-pick-no]').addEventListener('click', closePickDlg);
-    dlg.addEventListener('click', function (e) { if (e.target === dlg) closePickDlg(); });
-    dlg.querySelector('[data-pick-yes]').addEventListener('click', function () { confirmPick(q, dlg); });
+    pay = { q: q, code: '', coupons: [], preview: { ok: true, price: q.price, discount: 0, final: q.price }, claiming: false };
+    paintPaySheet();
+    TTV.api.listMyCoupons().then(function (x) {
+      if (!pay || pay.q !== q) return;
+      pay.coupons = (x && x.available) || [];
+      paintPaySheet();
+    }).catch(function () {});
   }
-  function confirmPick(q, dlg) {
-    if (choosing || !order) return;
+  function confirmPick() {
+    if (choosing || !order || !pay || !pay.q) return;
+    var q = pay.q, code = pay.code || '';
     choosing = true;
-    var yes = dlg.querySelector('[data-pick-yes]'); yes.disabled = true;
-    TTV.api.chooseQuote(order.id, q.id).then(function (res) {
+    var yes = document.querySelector('.is-quote-pay [data-qp="yes"]');
+    if (yes) yes.disabled = true;
+    TTV.api.chooseQuote(order.id, q.id, code).then(function (res) {
       choosing = false; closePickDlg(); stopTick(); stopPoll();
       TTV.Components.toast(t('quotes.pick.done'), 'success');
       if (res && res.order) order = res.order;
       quotes = (res && res.quotes) || [q];
       paintMatched();
     }).catch(function (err) {
-      choosing = false; yes.disabled = false;
-      var code = err && err.code;
-      if (code === 'QUOTE_GONE' || code === 'QUOTE_NOT_FOUND' || code === 'CONFLICT') { // báo giá đổi / đơn đã đổi: đóng hộp, tải lại danh sách
-        closePickDlg(); TTV.Components.toast((err && err.message) || t('quotes.err.title'), 'danger'); refresh(true);
+      choosing = false;
+      if (yes) yes.disabled = false;
+      var errCode = err && err.code;
+      if (errCode === 'QUOTE_GONE' || errCode === 'QUOTE_NOT_FOUND' || errCode === 'CONFLICT') {
+        closePickDlg(); TTV.Components.toast((err && err.message) || t('quotes.err.title'), 'error'); refresh(true);
         return;
       }
-      var el = dlg.querySelector('[data-pick-err]');
+      var el = document.querySelector('.is-quote-pay [data-pick-err]');
       if (el) { el.textContent = (err && err.message) || t('quotes.err.title'); el.hidden = false; }
+      else TTV.Components.toast((err && err.message) || t('quotes.err.title'), 'error');
     });
   }
 
@@ -265,6 +398,22 @@ TTV.screens = TTV.screens || {};
     });
   }
 
+  function matchedPayHtml(q) {
+    var pb = order.price_breakdown || {};
+    var quoted = Math.round(Number(q && q.price) || 0);
+    if (!quoted) quoted = Math.round(Number(order.final_price) || 0) + Math.round(Number(pb.discount) || 0);
+    var disc = Math.round(Number(pb.discount) || 0);
+    var total = order.final_price != null ? order.final_price : (quoted - disc);
+    var method = order.pay_method === 'wallet' ? t('od.pay.wallet') : t('od.pay.cash');
+    var offLabel = order.coupon_id ? t('od.pay.off', { code: order.coupon_id }) : t('od.pay.coupon');
+    return '<section class="order-card od-pay">' +
+      '<h2 class="od-h od-h--in">' + esc(t('od.pay')) + '</h2>' +
+      (quoted > 0 ? '<div class="od-row od-row--soft"><span>' + esc(t('od.pay.quote')) + '</span><b>' + money(quoted) + '</b></div>' : '') +
+      (disc > 0 ? '<div class="od-row od-row--soft"><span>' + esc(offLabel) + '</span><b>−' + money(disc) + '</b></div>' : '') +
+      '<div class="od-row od-row--total"><span>' + esc(t('od.pay.total')) + '</span><b>' + money(total) + '</b></div>' +
+      '<div class="od-row od-row--soft"><span>' + esc(t('od.pay.method')) + '</span><b>' + esc(method) + '</b></div>' +
+      '</section>';
+  }
   /* ----- Đơn đã ghép thợ ----- */
   function successCheck() {
     return '<span class="qc-success__icon" aria-hidden="true">' +
@@ -287,12 +436,12 @@ TTV.screens = TTV.screens || {};
           '<p class="qc-picked__label">' + esc(t('quotes.matched.picked')) + '</p>' +
           '<article class="qc-card qc-card--plain"><header class="qc-head">' + TTV.Components.avatar(v.name || '?', v.avatar_path, { size: 'md' }) +
             '<div class="qc-who"><b>' + esc(v.name || t('quotes.vendor.unknown')) + '</b><span>' + esc(typeText(v)) + '</span></div>' +
-            '<div class="qc-price"><b>' + money(order.final_price != null ? order.final_price : q.price) + '</b><small>' + esc(t('quotes.total')) + '</small></div></header>' +
+            '<div class="qc-price"><b>' + money(q.price) + '</b><small>' + esc(t('quotes.pay.base')) + '</small></div></header>' +
           '<p class="qc-meta">' + vendorMeta(q) + '</p>' +
           '<p class="qc-meta qc-meta--eta">' + esc(t('quotes.eta', { n: q.eta_min })) + '</p>' +
           (q.message ? '<p class="qc-msg">“' + esc(q.message) + '”</p>' : '') +
           (tel ? '<a class="btn btn-primary btn-block qc-call" href="tel:' + esc(tel) + '">' + esc(t('quotes.call', { phone: v.phone })) + '</a>' : '') +
-          '</article></section>' : '') +
+          '</article></section>' + matchedPayHtml(q) : '') +
       '</main>' +
       '<div class="quotes-bar"><button type="button" class="btn btn-secondary btn-block" data-route="/orders">' + esc(t('quotes.matched.cta')) + '</button></div>';
     bindList();
@@ -428,6 +577,30 @@ TTV.screens = TTV.screens || {};
     dlg.querySelector('[data-qc-rev-more]').addEventListener('click', loadPage);
     loadPage();
   }
+  function onDocClick(e) {
+    var paySheet = e.target.closest('.is-quote-pay');
+    if (paySheet && (e.target === paySheet || e.target.closest('button[data-sheet-close]'))) {
+      closePickDlg();
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+    if (!pay) return;
+    var cp = e.target.closest('[data-pick-coupon]');
+    if (cp) {
+      applyPayCoupon(cp.getAttribute('data-pick-coupon'), true);
+      document.querySelectorAll('.sheet-backdrop.is-order-coupons, .sheet-backdrop[data-cp-detail]').forEach(function (el) { el.remove(); });
+      return;
+    }
+    var act = e.target.closest('[data-qp]');
+    if (!act) return;
+    var k = act.getAttribute('data-qp');
+    if (k === 'apply') applyPayCoupon((document.querySelector('[data-qp-code]') || {}).value, false);
+    else if (k === 'clear') { pay.code = ''; payPreview(); }
+    else if (k === 'mine') openPayCouponList();
+    else if (k === 'no') closePickDlg();
+    else if (k === 'yes') confirmPick();
+  }
   function onPickClick(e) {
     var rev = e.target.closest('[data-reviews]');
     if (rev) {
@@ -446,6 +619,7 @@ TTV.screens = TTV.screens || {};
       rootEl = container;
       expiring = false; choosing = false; polling = false; pendingRefresh = false; quotes = []; quotesSig = ''; quoteStamp = '';
       rootEl.addEventListener('click', onPickClick);
+      document.addEventListener('click', onDocClick, true);
       var id = ctx && ctx.params && ctx.params.id;
       orderId = id || '';
       rootEl.classList.add('is-order');
@@ -471,6 +645,7 @@ TTV.screens = TTV.screens || {};
       stopTick(); stopPoll();
       closeCancelDlg(); closePickDlg(); closeReviews();
       if (rootEl) { rootEl.classList.remove('is-order'); rootEl.removeEventListener('click', onPickClick); }
+      document.removeEventListener('click', onDocClick, true);
       rootEl = null;
       order = null;
       orderId = '';

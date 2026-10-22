@@ -16,6 +16,7 @@ window.TTV = window.TTV || {};
     { id: 'orders_active', kind: 'count', icon: '◔', route: '/admin/orders' },
     { id: 'gmv', kind: 'money', icon: '₫', route: '/admin/finance' },
     { id: 'commission', kind: 'money', icon: '％', route: '/admin/finance' },
+    { id: 'promo_cost', kind: 'money', icon: '🏷', route: '/admin/promotions' },
     { id: 'new_customers', kind: 'count', icon: '♙', route: '/admin/customers' },
     { id: 'vendors_online', kind: 'count', icon: '⚒', route: '/admin/vendors' },
     { id: 'match_rate', kind: 'percent', icon: '✓', route: '/admin/orders' },

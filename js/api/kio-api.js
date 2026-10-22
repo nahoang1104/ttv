@@ -106,20 +106,21 @@ const KioStore = (() => {
   }
 
   function encodeItem(item, index) {
-    const key = keyOf(item, index);
+    const key = String(keyOf(item, index) || '');
     const raw = JSON.stringify(clonePlain(item));
-    const chunks = splitText(raw);
-    return {
-      key,
-      raw,
-      payloads: chunks.map((data, i) => JSON.stringify({
-        v: FORMAT_VERSION,
-        k: key,
-        i,
-        n: chunks.length,
-        d: data,
-      })),
-    };
+    const wrapLen = JSON.stringify({ v: FORMAT_VERSION, k: key, i: 99, n: 99, d: '' }).length;
+    let size = Math.max(24, Math.min(CHUNK_SIZE, 240 - wrapLen));
+    let chunks = splitText(raw, size);
+    let payloads = [];
+    for (let guard = 0; guard < 8; guard++) {
+      payloads = chunks.map((data, i) => JSON.stringify({
+        v: FORMAT_VERSION, k: key, i, n: chunks.length, d: data,
+      }));
+      if (payloads.every((s) => s.length <= 255)) break;
+      size = Math.max(16, Math.floor(size * 0.7));
+      chunks = splitText(raw, size);
+    }
+    return { key, raw, payloads };
   }
 
   function parsePayload(raw) {

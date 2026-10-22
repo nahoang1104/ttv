@@ -64,7 +64,8 @@ window.TTV = window.TTV || {};
       e.preventDefault();
       if (submit.disabled) return;
       busy = true; submit.disabled = true; submit.textContent = 'Đang đăng nhập…'; showError('');
-      TTV.api.loginStaff(user.value, pass.value).then(function (r) {
+      var login = function () { return TTV.api.loginStaff(user.value, pass.value); };
+      (TTV.seedReady || Promise.resolve()).then(login, login).then(function (r) {
         C.toast(r.must_change_pw ? 'Đăng nhập thành công. Vui lòng đổi mật khẩu lần đầu.' : 'Đăng nhập thành công.', 'success');
         TTV.Router.navigate(r.next);
       }).catch(function (e2) {

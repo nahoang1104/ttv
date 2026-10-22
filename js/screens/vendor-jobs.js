@@ -34,11 +34,11 @@ TTV.screens = TTV.screens || {};
         '<li><i class="vm-dot vm-dot--to"></i><span>' + esc((o.dropoff && o.dropoff.addr) || t('vendorMarket.noAddr')) + '</span></li>' +
       '</ul>' +
       '<div class="vm-card__foot">' +
-        '<div class="vm-offer"><small>' + esc(t('vendorJobs.pay')) + '</small><b>' + esc(vnd(o.final_price)) + '</b></div>' +
+        '<div class="vm-offer"><small>' + esc(t('vendorJobs.pay')) + '</small><b>' + esc(vnd(o.quote_price || o.final_price)) + '</b></div>' +
       '</div></a>';
   }
   function jobsSig(list) {
-    return (list || []).map(function (o) { return o.id + ':' + o.status + ':' + o.final_price; }).join('|');
+    return (list || []).map(function (o) { return o.id + ':' + o.status + ':' + (o.quote_price || o.final_price); }).join('|');
   }
   function paint() {
     if (!boxEl) return;

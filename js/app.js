@@ -1,15 +1,14 @@
-/* Điểm vào UI: mở DB, seed, đăng ký route. */
+/* Điểm vào UI: mở DB rồi điều hướng; seed chạy nền, không chặn khung app. */
 window.TTV = window.TTV || {};
 TTV.config = window.TTV_CONFIG;
 
-// Chuẩn bị DB và nạp seed một lần trước khi điều hướng.
-TTV.ready = TTV.Store.ready().then(function () { return TTV.Seed.run(); }).then(function (result) { return TTV.api.ensureSeedStaff().catch(function (e) { console.warn("[TTV] ensureSeedStaff:", e); }).then(function () { return result; }); }).then(function (result) {
+TTV.ready = TTV.Store.ready();
+TTV.seedReady = TTV.ready.then(function () { return TTV.Seed.run(); }).then(function (result) {
   TTV.seedResult = result;
-  return result;
+  return TTV.api.ensureSeedStaff().catch(function (e) { console.warn('[TTV] ensureSeedStaff:', e); }).then(function () { return result; });
 }).catch(function (error) {
   console.error('[TTV] Không thể khởi tạo dữ liệu:', error);
   TTV.Components && TTV.Components.toast('Không khởi tạo được dữ liệu: ' + error.message, 'danger');
-  throw error;
 });
 
 (function (TTV) {
@@ -60,6 +59,9 @@ TTV.ready = TTV.Store.ready().then(function () { return TTV.Seed.run(); }).then(
   TTV.Router.add('/wallet/history', function () {
     TTV.screens.wallet.renderHistory(document.getElementById('app'));
   }, { roles: ['CUSTOMER'], loginRoute: '/login', deniedRoute: '/login', destroy: function () { TTV.screens.wallet.destroy(); } });
+  TTV.Router.add('/wallet/deposit', function () {
+    TTV.screens.walletDeposit.render(document.getElementById('app'));
+  }, { roles: ['CUSTOMER'], loginRoute: '/login', deniedRoute: '/login', destroy: function () { TTV.screens.walletDeposit.destroy(); } });
   TTV.Router.add('/wallet', function () {
     TTV.screens.wallet.render(document.getElementById('app'));
   }, { roles: ['CUSTOMER'], loginRoute: '/login', deniedRoute: '/login', destroy: function () { TTV.screens.wallet.destroy(); } });

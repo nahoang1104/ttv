@@ -197,14 +197,58 @@ TTV.screens = TTV.screens || {};
       '<main class="page">' + TTV.Components.emptyState(t('wallet.err'), msg || '') + '</main>' +
       (mode === 'history' ? '' : TTV.Components.bottomTab('wallet'));
   }
+  function consumeVnpay() {
+    var raw = null;
+    try { raw = sessionStorage.getItem('ttv_vnpay_return'); sessionStorage.removeItem('ttv_vnpay_return'); } catch (_) {}
+    if (!raw) {
+      try { raw = localStorage.getItem('ttv_vnpay_return'); localStorage.removeItem('ttv_vnpay_return'); } catch (_) {}
+    }
+    var payload = null;
+    if (raw) {
+      try { payload = JSON.parse(raw); } catch (_) { payload = null; }
+    }
+    if (!payload && TTV.Router && TTV.Router.parse) {
+      try {
+        var q = (TTV.Router.parse(location.hash) || {}).query || {};
+        if (q.vnpay) payload = { txnRef: q.vnpay };
+      } catch (_) {}
+    }
+    if (!payload) return Promise.resolve(null);
+    return TTV.api.settleWalletTopup(payload).then(function (r) {
+      if (!r) return r;
+      if (r.status === 'success') TTV.Components.toast(t('wallet.deposit.ok', { amount: vnd(r.amount) }), 'success');
+      else TTV.Components.toast(t('wallet.deposit.fail'), 'danger');
+      return r;
+    }).catch(function (err) {
+      return TTV.api.recoverPendingTopups().then(function (rows) {
+        var ok = (rows || []).filter(function (x) { return x && x.status === 'success'; })[0];
+        if (ok) {
+          TTV.Components.toast(t('wallet.deposit.ok', { amount: vnd(ok.amount) }), 'success');
+          return ok;
+        }
+        TTV.Components.toast((err && err.message) || t('wallet.deposit.fail'), 'danger');
+        return null;
+      }).catch(function () {
+        TTV.Components.toast((err && err.message) || t('wallet.deposit.fail'), 'danger');
+        return null;
+      });
+    });
+  }
   function load() {
-    var p = mode === 'history'
-      ? Promise.all([TTV.api.getWallet(), TTV.api.listWalletTransactions({ tab: tab })])
-      : Promise.all([TTV.api.getWallet(), TTV.api.listWalletTransactions({ limit: 8 })]);
-    return p.then(function (parts) {
-      balance = parts[0].balance;
-      txs = parts[1] || [];
-      paint();
+    return consumeVnpay().then(function (settled) {
+      TTV.Store.invalidate(['users', 'wallet_transactions']);
+      var txOpts = mode === 'history' ? { tab: tab, force: true } : { limit: 8, force: true };
+      return Promise.all([
+        TTV.api.getWallet({ force: true }),
+        TTV.api.listWalletTransactions(txOpts)
+      ]).then(function (parts) {
+        balance = parts[0].balance;
+        if (settled && settled.status === 'success' && settled.balance != null) {
+          balance = Number(settled.balance) || balance;
+        }
+        txs = parts[1] || [];
+        paint();
+      });
     }).catch(function (err) {
       paintErr(err && err.message);
     });

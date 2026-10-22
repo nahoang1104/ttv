@@ -5,6 +5,10 @@ uploads/*
 !uploads/seed/**
 !uploads/img-giaodien/**
 
+pay/vnpay/config.local.php
+pay/vnpay/logs/*.log
+pay/vnpay/tickets/*.json
+
 # Hệ thống / editor
 .DS_Store
 Thumbs.db

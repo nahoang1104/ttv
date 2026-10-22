@@ -100,11 +100,12 @@ TTV.screens = TTV.screens || {};
     var now = rootEl.querySelector('.mq-tabs');
     if (now) now.scrollLeft = scroll;
   }
-  function load() {
+  function load(opts) {
     var my = ++token;
     if (!data) rootEl.innerHTML = shell(C.loading(t('common.loading')));
-    TTV.api.listMyQuotes().then(function (res) {
+    TTV.api.listMyQuotes(opts || {}).then(function (res) {
       if (my !== token || !rootEl) return;
+      if (res && res.unchanged) return;
       data = res || { quotes: [], counts: {} }; paint();
     }).catch(function (err) {
       if (my !== token || !rootEl) return;
@@ -125,7 +126,7 @@ TTV.screens = TTV.screens || {};
     var el = e.target.closest('[data-vqs]'); if (!el || !rootEl.contains(el)) return;
     var act = el.getAttribute('data-vqs');
     if (act === 'more') { shown += PAGE; paint(); }
-    else { shown = PAGE; load(); } // refresh / retry
+    else { shown = PAGE; load({ full: true }); } // refresh / retry
   }
   function render() {
     destroy();

@@ -174,11 +174,25 @@ TTV.screens = TTV.screens || {};
       tabBar('home') +
       '</div>';
   }
+  function dashStub() {
+    var s = TTV.auth.getSession() || {};
+    return {
+      vendor: { name: s.name || '', avatar_path: '', type: '', team_size: 1, rating: 0, jobs_done: 0 },
+      readiness: { online: false, blocked: false, limit: 0 },
+      today: { date: new Date(), completed: '—', earnings: 0 },
+      ongoing: { pendingQuotes: '—', activeJobs: '—' },
+      crew: null
+    };
+  }
   function renderHome() {
     destroyAll();
     currentView = 'home';
     var my = ++token, root = app();
-    root.innerHTML = C.loading(t('common.loading'));
+    var stub = lastDash || dashStub();
+    root.innerHTML = homeMarkup(stub);
+    bindAvatarFallback(root, stub.vendor.name);
+    bindCommon();
+    stopUnread = TTV.Utils.watchUnread(root);
     TTV.api.getVendorDashboard({ poll: !!dashStamp, since: dashStamp }).then(function (d) {
       if (my !== token) return;
       if (d && d.unchanged && lastDash) d = lastDash;
@@ -186,6 +200,7 @@ TTV.screens = TTV.screens || {};
         lastDash = d;
         if (d && d.stamp) dashStamp = d.stamp;
       }
+      if (stopUnread) { stopUnread(); stopUnread = null; }
       root.innerHTML = homeMarkup(d);
       bindAvatarFallback(root, d.vendor.name);
       bindCommon();

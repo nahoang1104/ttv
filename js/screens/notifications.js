@@ -210,8 +210,9 @@ TTV.screens = TTV.screens || {};
       rootEl = container;
       tab = 'all';
       painted = false;
-      rootEl.innerHTML = TTV.Components.header(t('noti.title')) +
-        '<main class="page">' + TTV.Components.loading(t('common.loading')) + '</main>';
+      paintShell();
+      var listBox = rootEl.querySelector('.nt-list');
+      if (listBox) listBox.innerHTML = TTV.Components.loading(t('common.loading'));
       document.addEventListener('click', onClick);
       unwatch = TTV.NotiLive.watchList(applyRows);
     },

@@ -48,6 +48,16 @@ TTV.screens = TTV.screens || {};
     promo: 'uploads/img-giaodien/chuyennhabaner.png',
     explore: 'uploads/img-giaodien/bocxepkhochuyennghiep.png'
   };
+  var FALLBACK_SERVICES = [
+    { code: 'moving', name: 'Chuyển nhà' },
+    { code: 'warehouse', name: 'Bốc xếp kho' },
+    { code: 'furniture', name: 'Nội thất' },
+    { code: 'office', name: 'Văn phòng' },
+    { code: 'construction', name: 'Công trình' },
+    { code: 'hourly', name: 'Theo giờ' },
+    { code: 'goods', name: 'Bốc vác hàng hóa' }
+  ];
+  var homeToken = 0;
 
   function bannerImage(banner) {
     return banner.image_path || BANNER_IMG[banner.type] || BANNER_IMG.promo;
@@ -218,34 +228,66 @@ TTV.screens = TTV.screens || {};
     if (service) { goCreate({ service: service.getAttribute('data-service') }); }
   }
 
+  function paintHome(container, data) {
+    if (carouselTimer) { clearInterval(carouselTimer); carouselTimer = null; }
+    carouselEl = null;
+    if (exploreEl && exploreEl._off) exploreEl._off();
+    exploreEl = null;
+    if (container._homeClick) {
+      container.removeEventListener('click', container._homeClick);
+      container._homeClick = null;
+    }
+    if (stopUnread) { stopUnread(); stopUnread = null; }
+    container.innerHTML = markup(data);
+    bindCarousel(container);
+    bindExploreDrag(container);
+    container.addEventListener('click', onClick);
+    container._homeClick = onClick;
+    if (stopUnread) stopUnread();
+    stopUnread = TTV.Utils.watchUnread(container);
+  }
+  function homeCatalog() {
+    return Promise.all([
+      TTV.api.listServices(),
+      TTV.api.listBanners(),
+      TTV.api.getSetting('zalo_url')
+    ]).then(function (parts) {
+      var empty = !(parts[0] && parts[0].length);
+      if (empty && TTV.seedReady) {
+        return TTV.seedReady.then(function () {
+          return Promise.all([TTV.api.listServices(), TTV.api.listBanners(), TTV.api.getSetting('zalo_url')]);
+        }).catch(function () { return parts; });
+      }
+      return parts;
+    });
+  }
+
   TTV.screens.home = {
     pasteKey: PASTE_KEY,
     render: function (container) {
       TTV.screens.home.destroy();
+      var my = ++homeToken;
       container.classList.remove('is-wide');
-      container.innerHTML = TTV.Components.loading(t('common.loading'));
-      Promise.all([
-        TTV.api.listServices(),
-        TTV.api.listBanners(),
-        TTV.api.getSetting('zalo_url')
-      ]).then(function (parts) {
-        container.innerHTML = markup({
-          services: parts[0] || [],
-          banners: parts[1] || [],
+      paintHome(container, {
+        services: FALLBACK_SERVICES,
+        banners: [{ type: 'promo', title: '', image_path: BANNER_IMG.promo }],
+        zalo: 'https://zalo.me',
+        unread: TTV.NotiLive ? TTV.NotiLive.unread() : 0
+      });
+      homeCatalog().then(function (parts) {
+        if (my !== homeToken) return;
+        paintHome(container, {
+          services: (parts[0] && parts[0].length) ? parts[0] : FALLBACK_SERVICES,
+          banners: (parts[1] && parts[1].length) ? parts[1] : [{ type: 'promo', title: '', image_path: BANNER_IMG.promo }],
           zalo: parts[2] || 'https://zalo.me',
           unread: TTV.NotiLive ? TTV.NotiLive.unread() : 0
         });
-        bindCarousel(container);
-        bindExploreDrag(container);
-        container.addEventListener('click', onClick);
-        container._homeClick = onClick;
-        if (stopUnread) stopUnread();
-        stopUnread = TTV.Utils.watchUnread(container);
-      }).catch(function (err) {
-        container.innerHTML = TTV.Components.emptyState('Không tải được trang chủ', err.message || t('common.error'));
+      }).catch(function () {
+        if (my !== homeToken) return;
       });
     },
     destroy: function () {
+      homeToken += 1;
       if (stopUnread) { stopUnread(); stopUnread = null; }
       if (carouselTimer) { clearInterval(carouselTimer); carouselTimer = null; }
       carouselEl = null;

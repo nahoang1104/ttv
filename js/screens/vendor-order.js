@@ -41,7 +41,8 @@ TTV.screens = TTV.screens || {};
   }
   function amountCard(v) {
     var won = isWonJob(v);
-    var price = won && v.final_price > 0 ? v.final_price : v.offer;
+    var quoted = Number((v.my_quote && v.my_quote.price) || v.quote_price || 0);
+    var price = won && quoted > 0 ? quoted : v.offer;
     var pb = v.price_breakdown, ref = '';
     if (pb && (pb.base != null || pb.weight != null || pb.floor != null || pb.distance != null)) {
       ref = '<div class="vo-ref"><h4>' + esc(t('vendorOrder.ref.title')) + '</h4>' +
@@ -71,7 +72,7 @@ TTV.screens = TTV.screens || {};
     if (!rootEl || !v || v.status === 'cancelled' || !window.L) return;
     var el = rootEl.querySelector('[data-vo-map]');
     var pick = v.pickup || {}, drop = v.dropoff || {};
-    if (!el || pick.lat == null || drop.lat == null) return;
+    if (!el || pick.lat == null) return;
     var gen = mapGen;
     mapObj = window.L.map(el, { zoomControl: false, attributionControl: false });
     window.L.control.zoom({ position: 'topright' }).addTo(mapObj);
@@ -85,41 +86,54 @@ TTV.screens = TTV.screens || {};
       });
     }
     var a = window.L.latLng(pick.lat, pick.lng);
-    var b = window.L.latLng(drop.lat, drop.lng);
-    var routeLayer = window.L.layerGroup().addTo(mapObj);
-    window.L.marker(a, { icon: pin('#22c55e'), interactive: false }).addTo(mapObj);
-    window.L.marker(b, { icon: pin('#ef4444'), interactive: false }).addTo(mapObj);
-    mapObj.fitBounds(window.L.latLngBounds(a, b), { padding: [28, 28], maxZoom: 16 });
-    function drawLine(latlngs) {
-      if (!mapObj || gen !== mapGen || !latlngs || latlngs.length < 2) return;
-      routeLayer.clearLayers();
-      window.L.polyline(latlngs, { color: '#ffffff', weight: 7, opacity: 0.9, lineJoin: 'round', lineCap: 'round' }).addTo(routeLayer);
-      window.L.polyline(latlngs, { color: '#1B7BE4', weight: 4, opacity: 1, lineJoin: 'round', lineCap: 'round' }).addTo(routeLayer);
-      mapObj.fitBounds(window.L.latLngBounds(latlngs), { padding: [28, 28], maxZoom: 16 });
-    }
-    drawLine([[pick.lat, pick.lng], [drop.lat, drop.lng]]);
-    if (TTV.map && TTV.map.routeLine) {
-      TTV.map.routeLine(pick, drop).then(function (latlngs) { drawLine(latlngs); });
+    window.L.marker(a, { icon: pin('#22c55e') }).on('click', function () { focusPlace('pick'); }).addTo(mapObj);
+    if (v.need_unload !== false && drop.lat != null) {
+      var b = window.L.latLng(drop.lat, drop.lng);
+      var routeLayer = window.L.layerGroup().addTo(mapObj);
+      window.L.marker(b, { icon: pin('#ef4444') }).on('click', function () { focusPlace('drop'); }).addTo(mapObj);
+      mapObj.fitBounds(window.L.latLngBounds(a, b), { padding: [28, 28], maxZoom: 16 });
+      function drawLine(latlngs) {
+        if (!mapObj || gen !== mapGen || !latlngs || latlngs.length < 2) return;
+        routeLayer.clearLayers();
+        window.L.polyline(latlngs, { color: '#ffffff', weight: 7, opacity: 0.9, lineJoin: 'round', lineCap: 'round' }).addTo(routeLayer);
+        window.L.polyline(latlngs, { color: '#1B7BE4', weight: 4, opacity: 1, lineJoin: 'round', lineCap: 'round' }).addTo(routeLayer);
+        mapObj.fitBounds(window.L.latLngBounds(latlngs), { padding: [28, 28], maxZoom: 16 });
+      }
+      drawLine([[pick.lat, pick.lng], [drop.lat, drop.lng]]);
+      if (TTV.map && TTV.map.routeLine) {
+        TTV.map.routeLine(pick, drop).then(function (latlngs) { drawLine(latlngs); });
+      }
+    } else {
+      mapObj.setView(a, 16);
     }
     setTimeout(function () { if (mapObj && gen === mapGen) mapObj.invalidateSize(); }, 200);
   }
+  function focusPlace(kind) {
+    var v = lastView;
+    if (!mapObj || !v || !TTV.map || !TTV.map.flyTo) return;
+    TTV.map.flyTo(mapObj, kind === 'drop' ? v.dropoff : v.pickup);
+    var box = rootEl && rootEl.querySelector('[data-vo-map]');
+    if (box && box.scrollIntoView) box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
   function mapHtml(v) {
     if (!v || v.status === 'cancelled') return '';
-    if (v.pickup && v.pickup.lat != null && v.dropoff && v.dropoff.lat != null) {
-      return '<div class="od-map-wrap vo-map">' +
-        '<div class="od-map" data-vo-map></div>' +
-        '<p class="od-map-legend"><span><i class="od-leg od-leg--pick"></i>' + esc(t('od.map.pick')) + '</span>' +
-          '<span><i class="od-leg od-leg--drop"></i>' + esc(t('od.map.drop')) + '</span></p></div>';
-    }
-    return '';
+    if (!v.pickup || v.pickup.lat == null) return '';
+    var legend = '<button type="button" data-vo-goto="pick"><i class="od-leg od-leg--pick"></i>' + esc(t('od.map.pick')) + '</button>' +
+      (v.need_unload !== false ? '<button type="button" data-vo-goto="drop"><i class="od-leg od-leg--drop"></i>' + esc(t('od.map.drop')) + '</button>' : '');
+    return '<div class="od-map-wrap vo-map">' +
+      '<div class="od-map" data-vo-map></div>' +
+      '<p class="od-map-legend">' + legend + '</p></div>';
   }
   function routeCard(v) {
+    var dropLi = v.need_unload !== false
+      ? '<li><button type="button" data-vo-goto="drop"><i class="vm-dot vm-dot--to"></i><div><small>' + esc(t('vendorOrder.route.dropoff')) + '</small><span>' + esc((v.dropoff && v.dropoff.addr) || t('vendorMarket.noAddr')) + '</span></div></button></li>'
+      : '';
     return '<section class="vo-card"><h3>' + esc(t('vendorOrder.route.title')) + '</h3>' +
       '<ul class="vm-route vo-route">' +
-        '<li><i class="vm-dot vm-dot--from"></i><div><small>' + esc(t('vendorOrder.route.pickup')) + '</small><span>' + esc(v.pickup.addr || t('vendorMarket.noAddr')) + '</span></div></li>' +
-        '<li><i class="vm-dot vm-dot--to"></i><div><small>' + esc(t('vendorOrder.route.dropoff')) + '</small><span>' + esc(v.dropoff.addr || t('vendorMarket.noAddr')) + '</span></div></li>' +
+        '<li><button type="button" data-vo-goto="pick"><i class="vm-dot vm-dot--from"></i><div><small>' + esc(t('vendorOrder.route.pickup')) + '</small><span>' + esc((v.pickup && v.pickup.addr) || t('vendorMarket.noAddr')) + '</span></div></button></li>' +
+        dropLi +
       '</ul>' +
-      (v.distance_km > 0 ? '<div class="vo-distance"><span>' + esc(t('vendorOrder.route.distance')) + '</span><b>' + esc(kmText(v.distance_km)) + '</b></div>' : '') +
+      (v.need_unload !== false && v.distance_km > 0 ? '<div class="vo-distance"><span>' + esc(t('vendorOrder.route.distance')) + '</span><b>' + esc(kmText(v.distance_km)) + '</b></div>' : '') +
       '</section>';
   }
   function infoCard(v) {
@@ -208,7 +222,7 @@ TTV.screens = TTV.screens || {};
       '<section class="vo-card vo-top"><span class="vm-card__icon" aria-hidden="true">' + esc(v.service_icon) + '</span>' +
         '<div><strong>' + esc(v.service_name) + '</strong><span>' + esc(v.code) + ' · ' + esc(t('vendorOrder.createdAt', { time: TTV.Utils.relativeTime(v.created_at) })) + '</span></div>' +
         '<div class="vm-card__badges">' + (v.speed === 'urgent' ? C.badge(t('vendorOrder.speed.urgent'), 'danger') : v.speed === 'fast' ? C.badge(t('vendorOrder.speed.fast'), 'warning') : '') + statusBadge(v.status) + '</div></section>' +
-      amountCard(v) + routeCard(v) + mapHtml(v) + infoCard(v) + mediaCard(v) + customerCard(v) +
+      amountCard(v) + mapHtml(v) + routeCard(v) + infoCard(v) + mediaCard(v) + customerCard(v) +
       '</main><div class="vo-actions" id="vo-actions" hidden></div>';
   }
   function shell(inner) {
@@ -255,6 +269,8 @@ TTV.screens = TTV.screens || {};
   function onClick(e) {
     var ph = e.target.closest('[data-od-zoom], [data-vo-photo]');
     if (ph) { openLightbox(ph.getAttribute('data-od-zoom') || ph.getAttribute('data-vo-photo')); return; }
+    var go = e.target.closest('[data-vo-goto]');
+    if (go) { focusPlace(go.getAttribute('data-vo-goto')); return; }
     if (e.target.closest('[data-vo-action="retry"]')) load(currentId, false);
   }
   function bindMedia() {
@@ -274,7 +290,7 @@ TTV.screens = TTV.screens || {};
 
   function orderViewSig(v) {
     if (!v) return '';
-    return [v.status, v.is_mine ? '1' : '0', v.final_price || '', v.offer || '',
+    return [v.status, v.is_mine ? '1' : '0', v.quote_price || '', v.offer || '',
       (v.customer && v.customer.phone) || '', (v.my_quote && v.my_quote.status) || '', v.action || ''].join('|');
   }
   function statusRank(st) {
