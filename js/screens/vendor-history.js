@@ -21,7 +21,7 @@ TTV.screens = TTV.screens || {};
       '<main class="vo-main">' + inner + '</main></div>';
   }
   function cardMarkup(o) {
-    var money = o.vendor_earning != null ? [t('vendorHistory.earn'), o.vendor_earning] : [t('vendorHistory.pay'), o.final_price];
+    var money = o.vendor_earning != null ? [t('vendorHistory.earn'), o.vendor_earning] : [t('vendorHistory.pay'), o.quote_price || o.final_price];
     return '<a class="vm-card" href="#/vendor/market/' + esc(o.id) + '">' +
       '<div class="vm-card__head">' +
         '<span class="vm-card__icon" aria-hidden="true">' + esc(o.service_icon) + '</span>' +

@@ -21,7 +21,7 @@ window.TTV = window.TTV || {};
     var c = cfg || {};
     var base = Math.max(0, Math.round(num(opts.basePrice)));
     var w = weightOf(opts.weight || 'medium');
-    var km = Math.max(0, num(opts.km));
+    var km = opts.needUnload === false ? 0 : Math.max(0, num(opts.km));
     var kmShown = Math.round(km * 100) / 100;
     var kmFee = Math.max(0, num(c.km_fee));
     var distance = Math.round(kmShown * kmFee);
@@ -60,13 +60,21 @@ window.TTV = window.TTV || {};
 
   // Tính giảm giá của mã (task 7.4). Chỉ áp dụng khi số thợ ≥ min_workers (mặc định 2) và số tiền ≥ min_order.
   // Giảm không làm số tiền xuống dưới mức tối thiểu (min_amount). Trả { ok, discount, final, reason }.
-  function applyCoupon(amount, coupon, workers, now) {
+  function applyCoupon(amount, coupon, workers, now, service) {
     var a = Math.max(0, Math.round(num(amount)));
     var out = { ok: false, discount: 0, final: a, reason: '' };
     if (!coupon) { out.reason = 'Mã giảm giá không tồn tại.'; return out; }
     var exp = coupon.expires_at ? new Date(coupon.expires_at).getTime() : NaN;
     var t = now == null ? Date.now() : (now instanceof Date ? now.getTime() : Number(now));
+    if (coupon.status === 'disabled') { out.reason = 'Mã giảm giá đã bị tắt.'; return out; }
     if (coupon.status === 'expired' || (isFinite(exp) && exp < t)) { out.reason = 'Mã giảm giá đã hết hạn.'; return out; }
+    var allowed = coupon.services;
+    if (Array.isArray(allowed) && allowed.length && service) {
+      if (allowed.indexOf(String(service)) < 0) {
+        out.reason = 'Mã không áp dụng cho dịch vụ này.';
+        return out;
+      }
+    }
     var minW = Math.max(1, Math.round(num(coupon.min_workers, 2)));
     if (Math.max(1, Math.round(num(workers, 1))) < minW) { out.reason = 'Mã chỉ áp dụng cho đơn từ ' + minW + ' thợ trở lên.'; return out; }
     var minOrder = Math.max(0, Math.round(num(coupon.min_order)));

@@ -33,6 +33,7 @@ TTV.screens = TTV.screens || {};
   var placing = false;
 
   function esc(v) { return TTV.Components.escape(v); }
+  function t(k, p) { return TTV.I18n.t(k, p); }
   function persistDraft() {
     if (!state) return;
     try {
@@ -301,8 +302,17 @@ TTV.screens = TTV.screens || {};
     return services.filter(function (s) { return (s.code || s.id) === state.service; })[0] || { name: 'Chuyển nhà', code: 'moving', icon: '🏠' };
   }
 
+  function needsDrop() {
+    return !!(state && state.needUnload);
+  }
+  function hasPickup() {
+    return !!(state && state.pickup && state.pickupLat != null);
+  }
+  function hasDrop() {
+    return !!(state && state.dropoff && state.dropLat != null);
+  }
   function hasRoute() {
-    return !!(state && state.pickup && state.dropoff && state.pickupLat != null && state.dropLat != null);
+    return hasPickup() && (!needsDrop() || hasDrop());
   }
   function offerAmount() {
     return parseInt(String(state && state.offer || ''), 10) || 0;
@@ -329,7 +339,15 @@ TTV.screens = TTV.screens || {};
     return minAmount();
   }
   function canSubmit() {
-    return hasRoute() && offerAmount() >= minOfferNow();
+    if (!hasRoute() || offerAmount() < minOfferNow()) return false;
+    if (state && state.pay === 'wallet' && offerAmount() > (Number(state.walletBalance) || 0)) return false;
+    return true;
+  }
+  function walletShort() {
+    return !!(state && state.pay === 'wallet' && offerAmount() > (Number(state.walletBalance) || 0));
+  }
+  function walletBalLabel() {
+    return 'Số dư ' + moneyVnd(Number(state && state.walletBalance) || 0);
   }
   function payLabel() {
     return state && state.pay === 'wallet' ? 'Ví' : 'Tiền mặt';
@@ -345,21 +363,24 @@ TTV.screens = TTV.screens || {};
     if (!state || !canSubmit()) return;
     closeSheet();
     var amt = moneyVnd(offerAmount());
-    var cta = 'Thanh toán ' + amt;
+    var wallet = state.pay === 'wallet';
+    var cta = wallet ? ('Thanh toán ' + amt) : 'Đặt đơn';
+    var routeHtml = needsDrop()
+      ? '<div class="order-confirm__stop" title="' + esc(state.pickup) + '">' + pinSvg('pick') + '<span>' + esc(state.pickup) + '</span></div>' +
+        '<span class="order-confirm__arrow" aria-hidden="true">›</span>' +
+        '<div class="order-confirm__stop" title="' + esc(state.dropoff) + '">' + pinSvg('drop') + '<span>' + esc(state.dropoff) + '</span></div>' +
+        '<span class="order-confirm__km">' + esc(kmText()) + '</span>'
+      : '<div class="order-confirm__stop" title="' + esc(state.pickup) + '">' + pinSvg('pick') + '<span>' + esc(state.pickup) + '</span></div>';
     var body =
       '<div class="order-confirm">' +
-        '<div class="order-confirm__route">' +
-          '<div class="order-confirm__stop" title="' + esc(state.pickup) + '">' + pinSvg('pick') + '<span>' + esc(state.pickup) + '</span></div>' +
-          '<span class="order-confirm__arrow" aria-hidden="true">›</span>' +
-          '<div class="order-confirm__stop" title="' + esc(state.dropoff) + '">' + pinSvg('drop') + '<span>' + esc(state.dropoff) + '</span></div>' +
-          '<span class="order-confirm__km">' + esc(kmText()) + '</span>' +
-        '</div>' +
+        '<div class="order-confirm__route">' + routeHtml + '</div>' +
         '<p class="order-confirm__pay"><span>Phương thức</span><b>' + esc(payLabel()) + '</b></p>' +
         '<p class="order-confirm__total"><span>Số tiền bạn trả</span><b class="order-confirm__money">' + amt + '</b></p>' +
-        '<p class="order-confirm__note">' +
-          '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" d="M12 3 5 6.2v5.3c0 4.6 3 8.8 7 10 4-1.2 7-5.4 7-10V6.2L12 3z"/><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="m8.6 12.1 2.2 2.2 4.6-4.6"/></svg>' +
-          'Thanh toán được thu trước khi ghép thợ' +
-        '</p>' +
+        (wallet
+          ? '<p class="order-confirm__note">' +
+            '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" d="M12 3 5 6.2v5.3c0 4.6 3 8.8 7 10 4-1.2 7-5.4 7-10V6.2L12 3z"/><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="m8.6 12.1 2.2 2.2 4.6-4.6"/></svg>' +
+            'Thanh toán được thu trước khi ghép thợ</p>'
+          : '') +
       '</div>';
     document.body.insertAdjacentHTML('beforeend', TTV.Components.sheet('Xác nhận đặt đơn', body, {
       footer: '<div class="order-confirm-acts">' +
@@ -382,7 +403,7 @@ TTV.screens = TTV.screens || {};
     TTV.api.createOrder({
         service: state.service,
         pickup: { addr: state.pickup, lat: state.pickupLat, lng: state.pickupLng },
-        dropoff: { addr: state.dropoff, lat: state.dropLat, lng: state.dropLng },
+        dropoff: needsDrop() ? { addr: state.dropoff, lat: state.dropLat, lng: state.dropLng } : { addr: '', lat: null, lng: null },
         distance_km: distanceKm(),
         weight: state.weight,
         pickup_floor: state.pickupFloor,
@@ -395,7 +416,7 @@ TTV.screens = TTV.screens || {};
         speed: state.speed,
         provider_type: state.provider,
         user_offer: offerAmount(),
-        pay_method: 'cash',
+        pay_method: state.pay === 'wallet' ? 'wallet' : 'cash',
         media: media
       }).then(function (order) {
       placing = false;
@@ -411,8 +432,14 @@ TTV.screens = TTV.screens || {};
     });
   }
   function submitButtonHtml() {
-    if (!hasRoute()) {
-      return '<button type="button" class="btn btn-block order-submit" disabled>Chọn điểm bốc &amp; điểm trả</button>';
+    if (!hasPickup()) {
+      return '<button type="button" class="btn btn-block order-submit" disabled>Chọn điểm bốc hàng</button>';
+    }
+    if (needsDrop() && !hasDrop()) {
+      return '<button type="button" class="btn btn-block order-submit" disabled>Chọn điểm trả hàng</button>';
+    }
+    if (walletShort()) {
+      return '<button type="button" class="btn btn-block order-submit" disabled>Số dư ví không đủ</button>';
     }
     if (!canSubmit()) {
       return '<button type="button" class="btn btn-block order-submit" disabled>Nhập số tiền bạn sẵn sàng trả</button>';
@@ -425,7 +452,7 @@ TTV.screens = TTV.screens || {};
     if (bar) bar.innerHTML = submitButtonHtml();
   }
   function distanceKm() {
-    if (!TTV.map || !state || state.pickupLat == null || state.dropLat == null) return 0;
+    if (!needsDrop() || !TTV.map || !state || state.pickupLat == null || state.dropLat == null) return 0;
     var km = TTV.map.distanceKm(
       { lat: state.pickupLat, lng: state.pickupLng },
       { lat: state.dropLat, lng: state.dropLng }
@@ -433,12 +460,14 @@ TTV.screens = TTV.screens || {};
     return km == null ? 0 : km;
   }
   function kmText() {
-    var km = distanceKm();
-    if (!hasRoute()) return '— km';
-    return km.toFixed(2).replace('.', ',') + ' km';
+    if (!needsDrop() || !hasDrop()) return '— km';
+    return distanceKm().toFixed(2).replace('.', ',') + ' km';
   }
   function offerWarnHtml() {
     if (!state) return '';
+    if (walletShort()) {
+      return '<p class="order-offer__warn" data-offer-warn>Số dư ví không đủ. <button type="button" class="order-offer__topup" data-action="topup">Nạp tiền</button></p>';
+    }
     if (state.speed === 'urgent') {
       var urgentMin = urgentMinOffer();
       if (offerAmount() >= urgentMin) return '';
@@ -455,11 +484,14 @@ TTV.screens = TTV.screens || {};
     var workerLine = q.workersFee
       ? '<li><span>Số thợ (×' + q.workers + ')</span><b>' + money(q.workersFee) + '</b></li>'
       : '';
+    var kmLine = needsDrop()
+      ? '<li><span>Phí khoảng cách (' + esc(q.kmLabel) + ')</span><b>' + money(q.distance) + '</b></li>'
+      : '';
     return '<ul class="order-quote" data-quote>' +
       '<li><span>Giá cơ bản</span><b>' + money(q.base) + '</b></li>' +
       '<li><span>Phí trọng lượng (' + esc(q.weightName) + ')</span><b>' + money(q.weight) + '</b></li>' +
       '<li><span>Phí tầng (' + esc(q.floorLabel) + ')</span><b>' + money(q.floor) + '</b></li>' +
-      '<li><span>Phí khoảng cách (' + esc(q.kmLabel) + ')</span><b>' + money(q.distance) + '</b></li>' +
+      kmLine +
       workerLine +
       '</ul>';
   }
@@ -486,6 +518,27 @@ TTV.screens = TTV.screens || {};
     if (hint) hint.insertAdjacentHTML('beforebegin', html);
   }
 
+  function payButtonsHtml() {
+    var cashOn = state.pay !== 'wallet';
+    var walOn = state.pay === 'wallet';
+    function radio(on) {
+      return '<span class="order-pay__radio' + (on ? ' is-on' : '') + '" aria-hidden="true"></span>';
+    }
+    return '<div class="order-pay">' +
+      '<button type="button" class="order-pay__btn' + (cashOn ? ' is-selected' : '') + '" data-pay="cash">' +
+        radio(cashOn) + ico('cash') +
+        '<span class="order-pay__txt"><strong>Tiền mặt</strong></span></button>' +
+      '<button type="button" class="order-pay__btn' + (walOn ? ' is-selected' : '') + '" data-pay="wallet">' +
+        radio(walOn) + ico('wallet') +
+        '<span class="order-pay__txt"><strong>Ví</strong><small>' + esc(walletBalLabel()) + '</small></span></button>' +
+      '</div>';
+  }
+  function loadWallet() {
+    if (!TTV.api || typeof TTV.api.getWallet !== 'function') return Promise.resolve(0);
+    return TTV.api.getWallet({ force: true }).then(function (w) {
+      return Number(w && w.balance) || 0;
+    }).catch(function () { return 0; });
+  }
   function markup() {
     var sv = currentService();
     var dropBlock = state.needUnload ? (
@@ -495,19 +548,21 @@ TTV.screens = TTV.screens || {};
     var offerText = state.offer ? money(state.offer) : 'Chưa nhập';
     return TTV.Components.header('Đặt đơn bốc vác', { back: true }) +
       '<main class="order-page">' +
-        '<section class="order-card order-route">' +
-          '<button type="button" class="order-swap" data-action="swap">' + ico('swap') + ' Hoán đổi</button>' +
+        '<section class="order-card order-route' + (needsDrop() ? '' : ' is-pickup-only') + '">' +
+          (needsDrop() ? '<button type="button" class="order-swap" data-action="swap">' + ico('swap') + ' Hoán đổi</button>' : '') +
           '<button type="button" class="order-stop" data-action="pick-pickup">' +
             '<span class="order-stop__ico">' + ico('pin') + '</span>' +
             '<span><strong>Điểm bốc hàng</strong><small>' + esc(state.pickup || 'Chọn điểm bốc hàng') + '</small></span></button>' +
-          '<span class="order-route__line"></span>' +
-          '<div class="order-stop-wrap">' +
-            '<button type="button" class="order-stop" data-action="pick-dropoff">' +
-              '<span class="order-stop__ico">' + ico('flag') + '</span>' +
-              '<span><strong>Điểm trả hàng</strong><small>' + esc(state.dropoff || 'Chọn điểm trả hàng') + '</small></span></button>' +
-            '<span class="order-km">' + esc(kmText()) + '</span>' +
-          '</div>' +
-          '<button type="button" class="order-add-stop" disabled>+ Thêm điểm trả (sắp có)</button>' +
+          (needsDrop()
+            ? '<span class="order-route__line"></span>' +
+              '<div class="order-stop-wrap">' +
+                '<button type="button" class="order-stop" data-action="pick-dropoff">' +
+                  '<span class="order-stop__ico">' + ico('flag') + '</span>' +
+                  '<span><strong>Điểm trả hàng</strong><small>' + esc(state.dropoff || 'Chọn điểm trả hàng') + '</small></span></button>' +
+                '<span class="order-km">' + esc(kmText()) + '</span>' +
+              '</div>' +
+              '<button type="button" class="order-add-stop" disabled>+ Thêm điểm trả (sắp có)</button>'
+            : '') +
         '</section>' +
         '<button type="button" class="order-card order-svc" data-action="change-service">' +
           serviceIconHtml(sv) + '<span class="order-svc__name">Dịch vụ: <b>' + esc(sv.name) + '</b></span><em>Đổi</em></button>' +
@@ -549,14 +604,15 @@ TTV.screens = TTV.screens || {};
         '<section class="order-card order-offer">' +
           '<div class="order-offer__top"><strong class="' + (state.offer ? '' : 'is-empty') + '">' + esc(offerText) + '</strong>' + ico('pencil') + '</div>' +
           offerWarnHtml() +
+          (state.pay === 'wallet' && offerAmount()
+            ? '<p class="order-hint" data-hold-hint>Tạm giữ tối đa ' + money(offerAmount()) + ' trong ví — hoàn phần chênh lệch khi bạn chọn thợ</p>'
+            : '') +
           '<p class="order-hint">Bạn sẵn sàng trả bao nhiêu cho việc này?</p>' +
           '<label class="order-amount"><input type="text" inputmode="numeric" data-offer placeholder="Tối thiểu ' + esc(TTV.Utils.money(minOfferNow(), { currency: false })) + '" value="' + esc(state.offer || '') + '"><span>đ</span></label>' +
           '<p class="order-hint">Bạn tự quyết mức giá · tối thiểu ' + money(minAmount()) + '</p>' +
           quoteLines() +
-          '<div class="order-pay">' +
-            '<button type="button" class="order-pay__btn' + (state.pay === 'cash' ? ' is-selected' : '') + '" data-pay="cash">' + ico('cash') + ' Tiền mặt</button>' +
-            '<button type="button" class="order-pay__btn is-locked" data-pay="wallet" disabled>' + ico('wallet') + ' Ví<small>Sắp có</small></button>' +
-          '</div></section>' +
+        '</section>' +
+        '<section class="order-card order-offer order-offer--pay">' + payButtonsHtml() + '</section>' +
       '</main>' +
       '<div class="order-bar">' + submitButtonHtml() + '</div>';
   }
@@ -620,23 +676,23 @@ TTV.screens = TTV.screens || {};
     if (w) { state.weight = w.getAttribute('data-weight'); paint(); return; }
     var pay = e.target.closest('[data-pay]');
     if (pay) {
-      if (pay.disabled || pay.classList.contains('is-locked')) return;
-      state.pay = pay.getAttribute('data-pay');
-      rootEl.querySelectorAll('[data-pay]').forEach(function (el) {
-        el.classList.toggle('is-selected', el.getAttribute('data-pay') === state.pay);
-      });
+      state.pay = pay.getAttribute('data-pay') === 'wallet' ? 'wallet' : 'cash';
+      persistDraft();
+      paint();
       return;
     }
     var action = e.target.closest('[data-action]');
     if (!action) return;
     var key = action.getAttribute('data-action');
     if (key === 'swap') {
+      if (!needsDrop()) return;
       var tmp = state.pickup; state.pickup = state.dropoff; state.dropoff = tmp;
       tmp = state.pickupLat; state.pickupLat = state.dropLat; state.dropLat = tmp;
       tmp = state.pickupLng; state.pickupLng = state.dropLng; state.dropLng = tmp;
       paint(); return;
     }
     if (key === 'pick-pickup' || key === 'pick-dropoff') {
+      if (key === 'pick-dropoff' && !needsDrop()) return;
       var mode = key === 'pick-dropoff' ? 'dropoff' : 'pickup';
       TTV.ui.placePicker.open({
         mode: mode,
@@ -657,6 +713,11 @@ TTV.screens = TTV.screens || {};
     }
     if (key === 'change-service') { openServiceSheet(); return; }
     if (key === 'open-speed') { openSpeedSheet(); return; }
+    if (key === 'topup') {
+      persistDraft();
+      TTV.Router.navigate('/wallet/deposit');
+      return;
+    }
     if (key === 'submit-order') {
       if (!canSubmit()) return;
       openConfirmSheet();
@@ -735,6 +796,7 @@ TTV.screens = TTV.screens || {};
         provider: draft.provider || 'any',
         offer: '',
         pay: draft.pay || 'cash',
+        walletBalance: 0,
         images: [],
         video: null
       };
@@ -742,9 +804,11 @@ TTV.screens = TTV.screens || {};
         TTV.api.listServices(),
         TTV.pricing && TTV.pricing.ready ? TTV.pricing.ready() : Promise.resolve(),
         query.reorder ? TTV.api.getOrder(query.reorder).catch(function () { return null; }) : Promise.resolve(null),
-        TTV.api.listAddresses ? TTV.api.listAddresses() : Promise.resolve([])
+        TTV.api.listAddresses ? TTV.api.listAddresses() : Promise.resolve([]),
+        loadWallet()
       ]).then(function (pack) {
         services = pack[0] || [];
+        if (state) state.walletBalance = Number(pack[4]) || 0;
         var old = pack[2];
         if (old && state) {
           var pick = old.pickup || {}, drop = old.dropoff || {};
@@ -765,7 +829,7 @@ TTV.screens = TTV.screens || {};
           state.note = old.note || '';
           state.speed = old.speed || 'default';
           state.provider = old.provider_type || 'any';
-          state.pay = old.pay_method === 'wallet' ? 'cash' : (old.pay_method || 'cash');
+          state.pay = old.pay_method === 'wallet' ? 'wallet' : (old.pay_method || 'cash');
         } else if (state) {
           var addrs = pack[3] || [];
           var pickDef = addrs.filter(function (a) { return a.default_for === 'pickup'; })[0];

@@ -36,12 +36,14 @@ TTV.screens = TTV.screens || {};
     var s = services[code];
     return (s && s.name) || code || 'Đơn bốc vác';
   }
-  function weightName(id) {
+  function weightTier(id) {
     var list = TTV.pricing && TTV.pricing.weightTiers ? TTV.pricing.weightTiers() : [];
     var found = null;
     list.forEach(function (w) { if (w.id === id) found = w; });
-    return (found && found.name) || '';
+    return found || { name: '', hint: '' };
   }
+  function weightName(id) { return weightTier(id).name || ''; }
+  function tOr(key, fallback) { var v = t(key); return v === key ? fallback : v; }
   function kmOne(n) {
     var x = Math.round((Number(n) || 0) * 10) / 10;
     return x.toFixed(1) + ' km';
@@ -53,7 +55,11 @@ TTV.screens = TTV.screens || {};
     return p(d.getHours()) + ':' + p(d.getMinutes()) + ' ' + p(d.getDate()) + '-' + p(d.getMonth() + 1);
   }
   function floorText(n, elevator) {
-    return t('od.floor', { n: Math.max(0, Math.round(Number(n) || 0)), lift: t(elevator ? 'od.lift.yes' : 'od.lift.no') });
+    var floor = Math.max(0, Math.round(Number(n) || 0));
+    var label = floor > 0 ? t('vendorOrder.floor', { n: floor }) : t('vendorOrder.floor.ground');
+    return floor > 0
+      ? label + ' · ' + t(elevator ? 'vendorOrder.elevator.yes' : 'vendorOrder.elevator.no')
+      : label;
   }
   function statusKey(st) {
     if (t('od.status.' + st) !== 'od.status.' + st) return 'od.status.' + st;
@@ -69,6 +75,9 @@ TTV.screens = TTV.screens || {};
     return '<img src="' + esc(src) + '" alt="">';
   }
 
+  function showsDrop() {
+    return !!(order && order.need_unload !== false);
+  }
   function unmountMap() {
     mapGen += 1;
     if (mapObj) {
@@ -81,7 +90,7 @@ TTV.screens = TTV.screens || {};
     if (!rootEl || !order || order.status === 'cancelled' || order.status === 'completed' || !window.L) return;
     var el = rootEl.querySelector('[data-od-map]');
     var pick = order.pickup || {}, drop = order.dropoff || {};
-    if (!el || pick.lat == null || drop.lat == null) return;
+    if (!el || pick.lat == null) return;
     var gen = mapGen;
     mapObj = window.L.map(el, { zoomControl: false, attributionControl: false });
     window.L.control.zoom({ position: 'topright' }).addTo(mapObj);
@@ -95,25 +104,34 @@ TTV.screens = TTV.screens || {};
       });
     }
     var a = window.L.latLng(pick.lat, pick.lng);
-    var b = window.L.latLng(drop.lat, drop.lng);
-    var routeLayer = window.L.layerGroup().addTo(mapObj);
-    window.L.marker(a, { icon: pin('#22c55e'), interactive: false }).addTo(mapObj);
-    window.L.marker(b, { icon: pin('#ef4444'), interactive: false }).addTo(mapObj);
-    mapObj.fitBounds(window.L.latLngBounds(a, b), { padding: [28, 28], maxZoom: 16 });
-    function drawLine(latlngs) {
-      if (!mapObj || gen !== mapGen || !latlngs || latlngs.length < 2) return;
-      routeLayer.clearLayers();
-      window.L.polyline(latlngs, { color: '#ffffff', weight: 7, opacity: 0.9, lineJoin: 'round', lineCap: 'round' }).addTo(routeLayer);
-      window.L.polyline(latlngs, { color: '#1B7BE4', weight: 4, opacity: 1, lineJoin: 'round', lineCap: 'round' }).addTo(routeLayer);
-      mapObj.fitBounds(window.L.latLngBounds(latlngs), { padding: [28, 28], maxZoom: 16 });
-    }
-    drawLine([[pick.lat, pick.lng], [drop.lat, drop.lng]]);
-    if (TTV.map && TTV.map.routeLine) {
-      TTV.map.routeLine(pick, drop).then(function (latlngs) {
-        drawLine(latlngs);
-      });
+    window.L.marker(a, { icon: pin('#22c55e') }).on('click', function () { focusPlace('pick'); }).addTo(mapObj);
+    if (showsDrop() && drop.lat != null) {
+      var b = window.L.latLng(drop.lat, drop.lng);
+      var routeLayer = window.L.layerGroup().addTo(mapObj);
+      window.L.marker(b, { icon: pin('#ef4444') }).on('click', function () { focusPlace('drop'); }).addTo(mapObj);
+      mapObj.fitBounds(window.L.latLngBounds(a, b), { padding: [28, 28], maxZoom: 16 });
+      function drawLine(latlngs) {
+        if (!mapObj || gen !== mapGen || !latlngs || latlngs.length < 2) return;
+        routeLayer.clearLayers();
+        window.L.polyline(latlngs, { color: '#ffffff', weight: 7, opacity: 0.9, lineJoin: 'round', lineCap: 'round' }).addTo(routeLayer);
+        window.L.polyline(latlngs, { color: '#1B7BE4', weight: 4, opacity: 1, lineJoin: 'round', lineCap: 'round' }).addTo(routeLayer);
+        mapObj.fitBounds(window.L.latLngBounds(latlngs), { padding: [28, 28], maxZoom: 16 });
+      }
+      drawLine([[pick.lat, pick.lng], [drop.lat, drop.lng]]);
+      if (TTV.map && TTV.map.routeLine) {
+        TTV.map.routeLine(pick, drop).then(function (latlngs) { drawLine(latlngs); });
+      }
+    } else {
+      mapObj.setView(a, 16);
     }
     setTimeout(function () { if (mapObj && gen === mapGen) mapObj.invalidateSize(); }, 200);
+  }
+  function focusPlace(kind) {
+    if (!mapObj || !order || !TTV.map || !TTV.map.flyTo) return;
+    var p = kind === 'drop' ? order.dropoff : order.pickup;
+    TTV.map.flyTo(mapObj, p);
+    var box = rootEl && rootEl.querySelector('[data-od-map]');
+    if (box && box.scrollIntoView) box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 
   function timelineHtml() {
@@ -133,29 +151,40 @@ TTV.screens = TTV.screens || {};
 
   function mapHtml() {
     if (!order || order.status === 'cancelled' || order.status === 'completed') return '';
-    if (order.pickup && order.pickup.lat != null && order.dropoff && order.dropoff.lat != null) {
-      return '<div class="od-map-wrap">' +
-        '<div class="od-map" data-od-map></div>' +
-        '<p class="od-map-legend"><span><i class="od-leg od-leg--pick"></i>' + esc(t('od.map.pick')) + '</span>' +
-          '<span><i class="od-leg od-leg--drop"></i>' + esc(t('od.map.drop')) + '</span></p>' +
-        '</div>';
-    }
-    return '';
+    if (!order.pickup || order.pickup.lat == null) return '';
+    var legend = '<button type="button" data-od-goto="pick"><i class="od-leg od-leg--pick"></i>' + esc(t('od.map.pick')) + '</button>' +
+      (showsDrop() ? '<button type="button" data-od-goto="drop"><i class="od-leg od-leg--drop"></i>' + esc(t('od.map.drop')) + '</button>' : '');
+    return '<div class="od-map-wrap">' +
+      '<div class="od-map" data-od-map></div>' +
+      '<p class="od-map-legend">' + legend + '</p>' +
+      '</div>';
   }
 
+  function infoRow(label, valueHtml) {
+    return '<div class="vo-row"><span>' + esc(label) + '</span><b>' + valueHtml + '</b></div>';
+  }
   function infoRows() {
-    var w = weightName(order.weight_tier);
+    var wt = weightTier(order.weight_tier);
+    var weightHtml = esc(wt.name || '—') + (wt.hint ? '<em>' + esc(wt.hint) + '</em>' : '');
     var rows = [
-      [t('od.weight'), w ? '(' + w + ')' : '—'],
-      [t('od.pickupFloor'), floorText(order.pickup_floor, order.pickup_elevator)],
-      [t('od.needUnload'), t(order.need_unload ? 'od.yes' : 'od.no')]
+      infoRow(t('vendorOrder.info.service'), esc(serviceName(order.service))),
+      infoRow(t('vendorOrder.info.weight'), weightHtml),
+      infoRow(t('vendorOrder.info.pickupFloor'), esc(floorText(order.pickup_floor, order.pickup_elevator))),
+      infoRow(t('vendorOrder.info.needUnload'), esc(t(order.need_unload ? 'od.yes' : 'od.no')))
     ];
-    if (order.need_unload !== false) rows.push([t('od.dropFloor'), floorText(order.drop_floor, order.drop_elevator)]);
-    rows.push([t('od.workers'), t('od.workersN', { n: order.workers || 1 })]);
-    rows.push([t('od.note'), order.note ? order.note : '—']);
-    return rows.map(function (r) {
-      return '<div class="od-row"><span>' + esc(r[0]) + '</span><b>' + esc(r[1]) + '</b></div>';
-    }).join('');
+    if (order.need_unload !== false) {
+      rows.push(infoRow(t('vendorOrder.info.dropFloor'), esc(floorText(order.drop_floor, order.drop_elevator))));
+    }
+    rows.push(
+      infoRow(t('vendorOrder.info.workers'), esc(String(order.workers || 1))),
+      infoRow(t('vendorOrder.info.speed'), esc(tOr('vendorOrder.speed.' + (order.speed || 'default'), order.speed))),
+      infoRow(t('vendorOrder.info.provider'), esc(tOr('vendorOrder.provider.' + (order.provider_type || 'any'), order.provider_type))),
+      infoRow(t('vendorOrder.info.pay'), esc(order.pay_method === 'wallet' ? t('od.pay.wallet') : t('od.pay.cash')))
+    );
+    return rows.join('') +
+      '<div class="vo-note"><small>' + esc(t('vendorOrder.info.note')) + '</small><p>' +
+        (order.note ? esc(order.note) : '<i>' + esc(t('vendorOrder.noNote')) + '</i>') +
+      '</p></div>';
   }
 
   function photoGrid(list) {
@@ -207,7 +236,7 @@ TTV.screens = TTV.screens || {};
     var v = order.vendor;
     if (!live || !v) return '';
     var q = order.accepted_quote || {};
-    var price = order.final_price != null ? order.final_price : q.price;
+    var price = Number(q.price) > 0 ? q.price : (Number(order.final_price) || 0);
     var tel = String(v.phone || '').replace(/[^\d+]/g, '');
     var rating = Number(v.rating) > 0
       ? '★ ' + Number(v.rating).toFixed(1).replace('.', ',')
@@ -217,7 +246,7 @@ TTV.screens = TTV.screens || {};
         '<header class="qc-head">' + TTV.Components.avatar(v.name || '?', v.avatar_path, { size: 'md' }) +
           '<div class="qc-who"><b>' + esc(v.name || t('quotes.vendor.unknown')) + '</b>' +
             '<span>' + esc(typeText(v)) + '</span></div>' +
-          '<div class="qc-price"><b>' + esc(vnd(price)) + '</b><small>' + esc(t('od.pay.total')) + '</small></div></header>' +
+          '<div class="qc-price"><b>' + esc(vnd(price)) + '</b><small>' + esc(t('od.pay.quote')) + '</small></div></header>' +
         '<p class="qc-meta">' + esc(rating) + ' · ' + esc(t('quotes.jobs', { n: Number(v.jobs_done) || 0 })) + '</p>' +
         (q.eta_min ? '<p class="qc-meta qc-meta--eta">' + esc(t('quotes.eta', { n: q.eta_min })) + '</p>' : '') +
         (q.message ? '<p class="qc-msg">“' + esc(q.message) + '”</p>' : '') +
@@ -249,11 +278,23 @@ TTV.screens = TTV.screens || {};
       [t('od.pay.weight', { name: w || '—' }), vnd(pb.weight)]
     ];
     if (Number(pb.floor) > 0) lines.push([t('od.pay.floor'), vnd(pb.floor)]);
-    lines.push([t('od.pay.km', { km: kmOne(order.distance_km) }), vnd(pb.distance)]);
-    var matched = order.final_price != null && order.status !== 'finding';
-    var totalLabel = matched ? t('od.pay.total') : t('od.pay.max');
-    var total = matched ? order.final_price : order.user_offer;
+    if (showsDrop()) lines.push([t('od.pay.km', { km: kmOne(order.distance_km) }), vnd(pb.distance)]);
+    var matched = order.status !== 'finding';
+    var q = order.accepted_quote || {};
+    var quoted = Math.round(Number(q.price) || 0);
+    if (!quoted) {
+      quoted = Math.round(Number(order.final_price) || 0) + Math.round(Number(pb.discount) || 0);
+    }
+    var total = matched && order.final_price != null ? order.final_price : order.user_offer;
+    var totalLabel = matched && order.final_price != null ? t('od.pay.total') : t('od.pay.max');
     var pay = order.pay_method === 'wallet' ? t('od.pay.wallet') : t('od.pay.cash');
+    var quoteRow = matched && quoted > 0
+      ? '<div class="od-row od-row--soft"><span>' + esc(t('od.pay.quote')) + '</span><b>' + esc(vnd(quoted)) + '</b></div>'
+      : '';
+    var offLabel = order.coupon_id ? t('od.pay.off', { code: order.coupon_id }) : t('od.pay.coupon');
+    var off = matched && Number(pb.discount) > 0
+      ? '<div class="od-row od-row--soft"><span>' + esc(offLabel) + '</span><b>−' + esc(vnd(pb.discount)) + '</b></div>'
+      : '';
     return '<section class="od-card od-pay">' +
       '<h2 class="od-h od-h--in">' + esc(t('od.pay')) + '</h2>' +
       '<div class="od-pay-ref">' +
@@ -263,6 +304,8 @@ TTV.screens = TTV.screens || {};
           return '<div class="od-row od-row--soft"><span>' + esc(r[0]) + '</span><b>' + esc(r[1]) + '</b></div>';
         }).join('') +
       '</div>' +
+      quoteRow +
+      off +
       '<div class="od-row od-row--total"><span>' + esc(totalLabel) + '</span><b>' + esc(vnd(total)) + '</b></div>' +
       '<div class="od-row od-row--soft"><span>' + esc(t('od.pay.method')) + '</span><b>' + esc(pay) + '</b></div>' +
       '</section>';
@@ -350,6 +393,11 @@ TTV.screens = TTV.screens || {};
     var st = order.status;
     var pick = (order.pickup && order.pickup.addr) || '—';
     var drop = (order.dropoff && order.dropoff.addr) || '—';
+    var routeStops = '<button type="button" class="od-stop" data-od-goto="pick"><i class="od-ico od-ico--pick"></i><div><small>' + esc(t('od.route.pick')) + '</small><p>' + esc(pick) + '</p></div></button>' +
+      (showsDrop()
+        ? '<button type="button" class="od-stop" data-od-goto="drop"><i class="od-ico od-ico--drop"></i><div><small>' + esc(t('od.route.drop')) + '</small><p>' + esc(drop) + '</p></div></button>' +
+          '<div class="od-stop od-stop--km"><i class="od-ico od-ico--km"></i><div><small>' + esc(t('od.route.km')) + '</small><p>' + esc(kmOne(order.distance_km)) + '</p></div></div>'
+        : '');
     rootEl.classList.add('is-order');
     rootEl.innerHTML =
       '<header class="app-header od-header">' +
@@ -370,13 +418,8 @@ TTV.screens = TTV.screens || {};
         timelineHtml() +
         mapHtml() +
         '<h2 class="od-h">' + esc(t('od.route')) + '</h2>' +
-        '<section class="od-card">' +
-          '<div class="od-stop"><i class="od-ico od-ico--pick"></i><div><small>' + esc(t('od.route.pick')) + '</small><p>' + esc(pick) + '</p></div></div>' +
-          '<div class="od-stop"><i class="od-ico od-ico--drop"></i><div><small>' + esc(t('od.route.drop')) + '</small><p>' + esc(drop) + '</p></div></div>' +
-          '<div class="od-stop od-stop--km"><i class="od-ico od-ico--km"></i><div><small>' + esc(t('od.route.km')) + '</small><p>' + esc(kmOne(order.distance_km)) + '</p></div></div>' +
-        '</section>' +
-        '<h2 class="od-h">' + esc(t('od.info')) + '</h2>' +
-        '<section class="od-card od-card--rows">' + infoRows() + '</section>' +
+        '<section class="od-card">' + routeStops + '</section>' +
+        '<section class="vo-card"><h3>' + esc(t('od.info')) + '</h3>' + infoRows() + '</section>' +
         vendorHtml() +
         photosHtml() +
         payHtml() +
@@ -476,6 +519,9 @@ TTV.screens = TTV.screens || {};
     });
     rootEl.querySelectorAll('[data-od-zoom]').forEach(function (btn) {
       btn.addEventListener('click', function () { openZoom(btn.getAttribute('data-od-zoom')); });
+    });
+    rootEl.querySelectorAll('[data-od-goto]').forEach(function (btn) {
+      btn.addEventListener('click', function () { focusPlace(btn.getAttribute('data-od-goto')); });
     });
   }
 

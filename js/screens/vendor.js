@@ -16,6 +16,8 @@ TTV.screens = TTV.screens || {};
   var pages = {};
   var stopLive = null;
   var stopUnread = null;
+  var dashStamp = '';
+  var lastDash = null;
 
   function t(key, params) { return TTV.I18n.t(key, params); }
   function esc(v) { return C.escape(v); }
@@ -172,21 +174,44 @@ TTV.screens = TTV.screens || {};
       tabBar('home') +
       '</div>';
   }
+  function dashStub() {
+    var s = TTV.auth.getSession() || {};
+    return {
+      vendor: { name: s.name || '', avatar_path: '', type: '', team_size: 1, rating: 0, jobs_done: 0 },
+      readiness: { online: false, blocked: false, limit: 0 },
+      today: { date: new Date(), completed: '—', earnings: 0 },
+      ongoing: { pendingQuotes: '—', activeJobs: '—' },
+      crew: null
+    };
+  }
   function renderHome() {
     destroyAll();
     currentView = 'home';
     var my = ++token, root = app();
-    root.innerHTML = C.loading(t('common.loading'));
-    TTV.api.getVendorDashboard().then(function (d) {
+    var stub = lastDash || dashStub();
+    root.innerHTML = homeMarkup(stub);
+    bindAvatarFallback(root, stub.vendor.name);
+    bindCommon();
+    stopUnread = TTV.Utils.watchUnread(root);
+    TTV.api.getVendorDashboard({ poll: !!dashStamp, since: dashStamp }).then(function (d) {
       if (my !== token) return;
+      if (d && d.unchanged && lastDash) d = lastDash;
+      else {
+        lastDash = d;
+        if (d && d.stamp) dashStamp = d.stamp;
+      }
+      if (stopUnread) { stopUnread(); stopUnread = null; }
       root.innerHTML = homeMarkup(d);
       bindAvatarFallback(root, d.vendor.name);
       bindCommon();
       stopUnread = TTV.Utils.watchUnread(root);
       if (TTV.Live && TTV.Live.watch) {
         stopLive = TTV.Live.watch('orders', function () {
-          TTV.api.getVendorDashboard().then(function (next) {
+          TTV.api.getVendorDashboard({ poll: true, since: dashStamp }).then(function (next) {
             if (currentView !== 'home') return;
+            if (next && next.unchanged) return;
+            lastDash = next;
+            if (next && next.stamp) dashStamp = next.stamp;
             var q = root.querySelector('[data-vendor-stat="quotes"]');
             var j = root.querySelector('[data-vendor-stat="jobs"]');
             if (q) q.textContent = String(next.ongoing.pendingQuotes);

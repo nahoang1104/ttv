@@ -108,6 +108,11 @@ window.TTV = window.TTV || {};
         return coords.map(function (c) { return [c[1], c[0]]; });
       }).catch(function () { return straight; });
     },
+    flyTo: function (mapObj, place) {
+      if (!mapObj || !place || place.lat == null || place.lng == null || !window.L) return;
+      var z = Math.max(mapObj.getZoom() || 16, 16);
+      mapObj.flyTo(window.L.latLng(Number(place.lat), Number(place.lng)), z, { duration: 0.4 });
+    },
     reverse: function (lat, lng) {
       return photon('reverse', { lon: lng, lat: lat }).then(function (data) {
         var row = featuresToPlaces(data)[0];

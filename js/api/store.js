@@ -168,7 +168,14 @@ window.TTV = window.TTV || {};
     get: function (table, id, opts) {
       validTable(table);
       var want = String(id);
-      return kioList(table, opts).then(function (rows) {
+      opts = opts || {};
+      var listOpts = Object.assign({}, opts);
+      if (!opts.scan && !listOpts.where) {
+        listOpts.where = [{ field: 'payload', operator: 'LIKE', value: '{"v":2,"k":"' + want + '"%' }];
+      }
+      delete listOpts.like;
+      delete listOpts.scan;
+      return kioList(table, listOpts).then(function (rows) {
         var found = null;
         (rows || []).some(function (r) {
           if (!r) return false;
@@ -185,10 +192,7 @@ window.TTV = window.TTV || {};
       if (APPEND_TABLES[table]) {
         return kioApi().appendCollection(remote, [copy]).then(function () { return copy; });
       }
-      return kioList(table).then(function (rows) {
-        if (!(rows && rows.length)) return kioApi().appendCollection(remote, [copy]);
-        return kioApi().syncCollection(remote, [copy]);
-      }).then(function () { return copy; });
+      return kioApi().upsertItems(remote, [copy]).then(function () { return copy; });
     },
     putAll: function (table, records) {
       validTable(table);
@@ -198,10 +202,7 @@ window.TTV = window.TTV || {};
       if (APPEND_TABLES[table]) {
         return kioApi().appendCollection(remote, records).then(function () { return records.length; });
       }
-      return kioList(table).then(function (rows) {
-        if (!(rows && rows.length)) return kioApi().appendCollection(remote, records);
-        return kioApi().syncCollection(remote, records);
-      }).then(function () { return records.length; });
+      return kioApi().upsertItems(remote, records).then(function () { return records.length; });
     },
     remove: function (table, id) {
       validTable(table);
@@ -237,7 +238,7 @@ window.TTV = window.TTV || {};
     }
   };
 
-  var store = isKio() ? kioStore : localStore;
+  var store = kioStore;
   TTV.Store = store;
   TTV.store = store;
 })(window.TTV);

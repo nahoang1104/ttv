@@ -53,7 +53,8 @@ window.TTV = window.TTV || {};
       }).then(function () {
         return chain(made, function (m) { return TTV.Store.put('orders', m.order).then(function () { return chain(m.media, function (md) { return TTV.Store.put('order_media', md); }); }); });
       }).then(function () {
-        if (TTV.Live && TTV.Live.ping) TTV.Live.ping('orders');
+        if (TTV.api && typeof TTV.api.pingLive === 'function') TTV.api.pingLive('orders');
+        else if (TTV.Live && TTV.Live.ping) TTV.Live.ping('orders');
         return made.length;
       });
     },
@@ -65,7 +66,8 @@ window.TTV = window.TTV || {};
         n = rows.length;
         return chain(rows, function (r) { return TTV.Store.remove(r[0], r[1]); });
       }).then(function () {
-        if (TTV.Live && TTV.Live.ping) TTV.Live.ping('orders');
+        if (TTV.api && typeof TTV.api.pingLive === 'function') TTV.api.pingLive('orders', true);
+        else if (TTV.Live && TTV.Live.ping) TTV.Live.ping('orders');
         return n;
       });
     }
